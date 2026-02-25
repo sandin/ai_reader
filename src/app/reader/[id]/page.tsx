@@ -797,6 +797,9 @@ export default function ReaderPage() {
 
   // Create a new session
   const createNewSession = useCallback(() => {
+    // 清除当前高亮
+    clearHighlights();
+
     const newSessionId = Date.now().toString();
     setCurrentSessionId(newSessionId);
     setMessages([]);
@@ -811,6 +814,53 @@ export default function ReaderPage() {
     setSessions(prev => [...prev, newSession]);
   }, [selectedBlocks]);
 
+  // 高亮管理
+  const highlightRefs = useRef<Map<string, string>>(new Map());
+
+  // 清除所有高亮
+  const clearHighlights = useCallback(() => {
+    if (!rendition) return;
+    highlightRefs.current.forEach((cfiRange, blockId) => {
+      try {
+        rendition.annotations.remove(cfiRange, 'highlight');
+      } catch (e) {
+        console.warn('Failed to remove highlight:', e);
+      }
+    });
+    highlightRefs.current.clear();
+  }, [rendition]);
+
+  // 添加高亮
+  const highlightBlock = useCallback((block: Block) => {
+    if (!rendition || !block.cfiRange) return;
+
+    // 如果已经高亮过，先移除
+    if (highlightRefs.current.has(block.id)) {
+      try {
+        rendition.annotations.remove(block.cfiRange, 'highlight');
+      } catch (e) {
+        console.warn('Failed to remove old highlight:', e);
+      }
+    }
+
+    try {
+      const highlightId = rendition.annotations.highlight(
+        block.cfiRange,
+        {},
+        () => {}
+      );
+      highlightRefs.current.set(block.id, block.cfiRange);
+    } catch (e) {
+      console.warn('Failed to highlight block:', e);
+    }
+  }, [rendition]);
+
+  // 刷新当前 session 的高亮
+  const refreshHighlights = useCallback((blocks: Block[]) => {
+    clearHighlights();
+    blocks.forEach(block => highlightBlock(block));
+  }, [clearHighlights, highlightBlock]);
+
   // Switch to an existing session
   const switchToSession = useCallback((sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId);
@@ -818,8 +868,10 @@ export default function ReaderPage() {
       setCurrentSessionId(sessionId);
       setMessages(session.messages || []);
       setSelectedBlocks(session.selectedBlocks || []);
+      // 刷新高亮
+      refreshHighlights(session.selectedBlocks || []);
     }
-  }, [sessions]);
+  }, [sessions, refreshHighlights]);
 
   // Edit session title
   const handleEditSession = useCallback((sessionId: string) => {
@@ -868,22 +920,40 @@ export default function ReaderPage() {
   }, [editingSessionId, editingSessionTitle, sessions, currentSessionId, currentChapter, bookId]);
 
   // Delete a session
-  const deleteSession = useCallback((sessionId: string, e: React.MouseEvent) => {
+  const deleteSession = useCallback(async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
 
     const newSessions = sessions.filter(s => s.id !== sessionId);
     setSessions(newSessions);
+
+    // 调用 API 删除服务器上的 session
+    if (currentChapter && bookId) {
+      const htmlFile = currentChapter.split('#')[0];
+      const encodedHtmlFile = encodeURIComponent(htmlFile);
+      try {
+        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        });
+      } catch (err) {
+        console.error('Failed to delete session from server:', err);
+      }
+    }
 
     // If deleting current session, switch to another or clear
     if (currentSessionId === sessionId) {
       if (newSessions.length > 0) {
         switchToSession(newSessions[newSessions.length - 1].id);
       } else {
+        // 删除所有 session 时，清空选中文字和高亮
         setCurrentSessionId(null);
         setMessages([]);
+        setSelectedBlocks([]);
+        clearHighlights();
       }
     }
-  }, [sessions, currentSessionId, switchToSession]);
+  }, [sessions, currentSessionId, switchToSession, clearHighlights, currentChapter, bookId]);
 
   // Load notes when currentChapter changes
   useEffect(() => {
@@ -891,6 +961,13 @@ export default function ReaderPage() {
       loadNotesForChapter(currentChapter);
     }
   }, [currentChapter, isContentReady, loadNotesForChapter]);
+
+  // 当 isContentReady 变为 true 时，加载当前 session 的高亮
+  useEffect(() => {
+    if (isContentReady && selectedBlocks.length > 0) {
+      refreshHighlights(selectedBlocks);
+    }
+  }, [isContentReady]);
 
   // Handle add to AI assistant
   const handleAddToAssistant = async () => {
@@ -906,6 +983,7 @@ export default function ReaderPage() {
 
       const newSelectedBlocks = [...selectedBlocks, newBlock];
       setSelectedBlocks(newSelectedBlocks);
+      highlightBlock(newBlock);
       setShowContextMenu(false);
 
       // Create session if doesn't exist
@@ -964,6 +1042,7 @@ export default function ReaderPage() {
       setCurrentSessionId(newSessionId);
       setMessages([]);
       setSelectedBlocks(newSelectedBlocks);
+      highlightBlock(newBlock);
 
       const newSession = {
         id: newSessionId,
@@ -1000,6 +1079,17 @@ export default function ReaderPage() {
 
   // Handle remove block
   const handleRemoveBlock = async (id: string) => {
+    // 找到要删除的 block 并清除高亮
+    const removedBlock = selectedBlocks.find(b => b.id === id);
+    if (removedBlock && removedBlock.cfiRange && rendition) {
+      try {
+        rendition.annotations.remove(removedBlock.cfiRange, 'highlight');
+        highlightRefs.current.delete(id);
+      } catch (e) {
+        console.warn('Failed to remove highlight:', e);
+      }
+    }
+
     // Remove from local state
     const newSelectedBlocks = selectedBlocks.filter(b => b.id !== id);
     setSelectedBlocks(newSelectedBlocks);
