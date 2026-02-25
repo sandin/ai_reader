@@ -48,6 +48,25 @@ export default function ReaderPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+
+  // 输入历史相关状态
+  const [inputHistory, setInputHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
+
+  // 加载输入历史
+  useEffect(() => {
+    const savedHistory = localStorage.getItem('ai-chat-input-history');
+    if (savedHistory) {
+      try {
+        setInputHistory(JSON.parse(savedHistory));
+      } catch (e) {
+        console.error('Failed to parse input history:', e);
+      }
+    }
+  }, []);
   const [selectedBlocks, setSelectedBlocks] = useState<Block[]>([]);
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
   const [isSelectedBlocksExpanded, setIsSelectedBlocksExpanded] = useState(false);
@@ -55,11 +74,17 @@ export default function ReaderPage() {
   // Session management
   const [sessions, setSessions] = useState<Array<{
     id: string;
+    title: string;
     selectedBlocks: Block[];
     messages: Message[];
     timestamp: number;
   }>>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+
+  // Edit session modal state
+  const [showEditSession, setShowEditSession] = useState(false);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingSessionTitle, setEditingSessionTitle] = useState('');
 
   // Context menu state
   const [showContextMenu, setShowContextMenu] = useState(false);
@@ -75,6 +100,7 @@ export default function ReaderPage() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const selectionHandlerAdded = useRef(false);
   const isResizingRef = useRef(false);
 
@@ -373,6 +399,7 @@ export default function ReaderPage() {
                         if (data.sessions && data.sessions.length > 0) {
                           const loadedSessions = data.sessions.map((session: any) => ({
                             id: session.id,
+                            title: session.title || `对话 ${data.sessions.indexOf(session) + 1}`,
                             selectedBlocks: session.selectedBlocks || [],
                             messages: session.messages || [],
                             timestamp: session.timestamp,
@@ -493,6 +520,15 @@ export default function ReaderPage() {
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setAiLoading(true);
+    setHistoryIndex(-1);
+    setShowSuggestions(false);
+
+    // 保存输入到历史记录
+    if (input.trim()) {
+      const newHistory = [input, ...inputHistory.filter(h => h !== input)].slice(0, 50);
+      setInputHistory(newHistory);
+      localStorage.setItem('ai-chat-input-history', JSON.stringify(newHistory));
+    }
 
     try {
       // 准备历史消息
@@ -531,22 +567,30 @@ export default function ReaderPage() {
       const newMessages = [...messages, userMessage, assistantMessage];
       setMessages(newMessages);
 
-      // Create new session if doesn't exist
+      // Create new session if doesn't exist, or update existing session
       let sessionId = currentSessionId;
       if (!sessionId) {
         sessionId = Date.now().toString();
         setCurrentSessionId(sessionId);
         const newSession = {
           id: sessionId,
+          title: `对话 ${sessions.length + 1}`,
           selectedBlocks,
           messages: newMessages,
           timestamp: Date.now(),
         };
         setSessions(prev => [...prev, newSession]);
+      } else {
+        // Update existing session's messages
+        setSessions(prev => prev.map(s =>
+          s.id === sessionId
+            ? { ...s, messages: newMessages, timestamp: Date.now() }
+            : s
+        ));
       }
 
-      // Save current session
-      saveCurrentSession();
+      // Save current session with the new messages
+      await saveCurrentSession(newMessages);
     } catch (err) {
       console.error('Error calling LLM:', err);
       const errorData = err instanceof Error ? err.message : String(err);
@@ -597,6 +641,7 @@ export default function ReaderPage() {
         if (data.sessions && data.sessions.length > 0) {
           const loadedSessions = data.sessions.map((session: any) => ({
             id: session.id,
+            title: session.title || `对话 ${data.sessions.indexOf(session) + 1}`,
             selectedBlocks: session.selectedBlocks || [],
             messages: session.messages || [],
             timestamp: session.timestamp,
@@ -622,8 +667,12 @@ export default function ReaderPage() {
   }, [bookId]);
 
   // Save current session
-  const saveCurrentSession = useCallback(async () => {
+  const saveCurrentSession = useCallback(async (messagesToSave?: Message[]) => {
     if (!currentSessionId || !bookId || !currentChapter) return;
+
+    const messagesToUse = messagesToSave ?? messages;
+    const currentSession = sessions.find(s => s.id === currentSessionId);
+    const title = currentSession?.title || '';
 
     try {
       const htmlFile = currentChapter.split('#')[0];
@@ -636,24 +685,55 @@ export default function ReaderPage() {
         },
         body: JSON.stringify({
           sessionId: currentSessionId,
+          title,
           selectedBlocks,
-          messages,
+          messages: messagesToUse,
         }),
       });
     } catch (err) {
       console.error('Failed to save session:', err);
     }
-  }, [bookId, currentChapter, currentSessionId, selectedBlocks, messages]);
+  }, [bookId, currentChapter, currentSessionId, selectedBlocks, messages, sessions]);
+
+  // Save session when selectedBlocks change
+  const prevSelectedBlocksRef = useRef<string>('');
+  useEffect(() => {
+    if (!currentSessionId || !bookId || !currentChapter) return;
+
+    const currentBlocksKey = JSON.stringify(selectedBlocks.map(b => ({ id: b.id, content: b.content })));
+    if (prevSelectedBlocksRef.current === '') {
+      prevSelectedBlocksRef.current = currentBlocksKey;
+      return;
+    }
+    if (prevSelectedBlocksRef.current === currentBlocksKey) return;
+
+    prevSelectedBlocksRef.current = currentBlocksKey;
+
+    // Debounce save
+    const timer = setTimeout(() => {
+      saveCurrentSession(messages);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [currentSessionId, bookId, currentChapter, selectedBlocks, messages, saveCurrentSession]);
+
+  // Auto scroll to bottom when messages change
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [messages]);
 
   // Create a new session
   const createNewSession = useCallback(() => {
     const newSessionId = Date.now().toString();
     setCurrentSessionId(newSessionId);
     setMessages([]);
-    // Don't clear selectedBlocks - user might want to use same selection
+    setSelectedBlocks([]);
     const newSession = {
       id: newSessionId,
-      selectedBlocks,
+      title: `对话 ${sessions.length + 1}`,
+      selectedBlocks: [],
       messages: [],
       timestamp: Date.now(),
     };
@@ -669,6 +749,52 @@ export default function ReaderPage() {
       setSelectedBlocks(session.selectedBlocks || []);
     }
   }, [sessions]);
+
+  // Edit session title
+  const handleEditSession = useCallback((sessionId: string) => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (session) {
+      setEditingSessionId(sessionId);
+      setEditingSessionTitle(session.title);
+      setShowEditSession(true);
+    }
+  }, [sessions]);
+
+  const handleSaveSessionTitle = useCallback(async () => {
+    if (!editingSessionId || !editingSessionTitle.trim()) return;
+
+    // Update local state
+    setSessions(prev => prev.map(s =>
+      s.id === editingSessionId
+        ? { ...s, title: editingSessionTitle.trim() }
+        : s
+    ));
+
+    // Save to server
+    const session = sessions.find(s => s.id === editingSessionId);
+    if (session && currentSessionId && currentChapter && bookId) {
+      try {
+        const htmlFile = currentChapter.split('#')[0];
+        const encodedHtmlFile = encodeURIComponent(htmlFile);
+        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: editingSessionId,
+            selectedBlocks: session.selectedBlocks,
+            messages: session.messages,
+            title: editingSessionTitle.trim(),
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to save session title:', err);
+      }
+    }
+
+    setShowEditSession(false);
+    setEditingSessionId(null);
+    setEditingSessionTitle('');
+  }, [editingSessionId, editingSessionTitle, sessions, currentSessionId, currentChapter, bookId]);
 
   // Delete a session
   const deleteSession = useCallback((sessionId: string, e: React.MouseEvent) => {
@@ -718,6 +844,7 @@ export default function ReaderPage() {
         setCurrentSessionId(sessionId);
         const newSession = {
           id: sessionId,
+          title: `对话 ${sessions.length + 1}`,
           selectedBlocks: newSelectedBlocks,
           messages: [],
           timestamp: Date.now(),
@@ -924,14 +1051,14 @@ export default function ReaderPage() {
           }`}
           style={{ width: showToc ? tocWidth : 0 }}
         >
-          <div className="p-4" style={{ width: tocWidth }}>
-            <div className="flex items-center gap-2 mb-4">
+          <div className="p-3 border-b border-slate-100" style={{ width: tocWidth }}>
+            <div className="flex items-center gap-2">
               <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
               </svg>
               <h2 className="font-semibold text-slate-800">目录</h2>
             </div>
-            <ul className="space-y-1">
+            <ul className="space-y-1 mt-4">
               {chapters.map((chapter) => {
                 const isActive = currentChapter.includes(chapter.href) || chapter.href.includes(currentChapter);
                 return (
@@ -995,8 +1122,13 @@ export default function ReaderPage() {
 
           {/* Current chapter indicator and navigation */}
           {(currentChapterTitle || selectedChapter) && (
-            <div className="sticky top-0 bg-white/90 backdrop-blur-sm border-b border-slate-100 px-6 py-2 z-10 flex items-center justify-between">
-              <p className="text-sm text-slate-500 truncate">{currentChapterTitle || '加载中...'}</p>
+            <div className="sticky top-0 bg-white/90 backdrop-blur-sm border-b border-slate-100 p-3 z-10 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                </svg>
+                <p className="text-sm text-slate-600 truncate">{currentChapterTitle || '加载中...'}</p>
+              </div>
               {selectedChapter && spineItems.length > 0 && (
                 <div className="flex items-center gap-2">
                   <button
@@ -1058,29 +1190,22 @@ export default function ReaderPage() {
           className="bg-white border-l border-slate-200 flex flex-col shrink-0"
           style={{ width: chatWidth }}
         >
-          <div className="p-4 border-b border-slate-100">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                  </svg>
-                </div>
-                <div>
-                  <h2 className="font-semibold text-slate-800">AI 助手</h2>
-                  <p className="text-xs text-slate-500">智能问答</p>
-                </div>
-              </div>
-              <button
-                onClick={createNewSession}
-                className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                title="新建对话"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-              </button>
+          <div className="p-3 border-b border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              <h2 className="font-semibold text-slate-800">AI 助手</h2>
             </div>
+            <button
+              onClick={createNewSession}
+              className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition-colors"
+              title="新建对话"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
           </div>
 
           {/* Session tabs */}
@@ -1100,7 +1225,16 @@ export default function ReaderPage() {
                       onClick={() => switchToSession(session.id)}
                       className="px-2 py-1.5 hover:opacity-70 transition-opacity"
                     >
-                      对话 {index + 1}
+                      {session.title}
+                    </button>
+                    <button
+                      onClick={() => handleEditSession(session.id)}
+                      className="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 transition-colors"
+                      title="重命名"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
                     </button>
                     <button
                       onClick={(e) => deleteSession(session.id, e)}
@@ -1180,7 +1314,10 @@ export default function ReaderPage() {
           )}
 
           {/* Messages */}
-          <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${selectedBlocks.length > 0 ? 'min-h-0' : ''}`}>
+          <div
+            ref={chatContainerRef}
+            className={`flex-1 overflow-y-auto p-4 space-y-4 ${selectedBlocks.length > 0 ? 'min-h-0' : ''}`}
+          >
             {messages.length === 0 && selectedBlocks.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center">
                 <div className="w-16 h-16 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-full flex items-center justify-center mb-4">
@@ -1261,7 +1398,7 @@ export default function ReaderPage() {
 
           {/* Input area */}
           <div className="p-4 border-t border-slate-100 bg-slate-50">
-            <div className="flex gap-2 items-end">
+            <div className="flex gap-2 items-end relative">
               <textarea
                 ref={(el) => {
                   if (el) {
@@ -1271,7 +1408,25 @@ export default function ReaderPage() {
                 }}
                 value={input}
                 onChange={(e) => {
-                  setInput(e.target.value);
+                  const value = e.target.value;
+                  setInput(value);
+                  // 重置历史索引
+                  setHistoryIndex(-1);
+
+                  // 自动补全建议
+                  if (value.trim()) {
+                    const matched = inputHistory.filter(h => h.toLowerCase().includes(value.toLowerCase())).slice(0, 5);
+                    if (matched.length > 0) {
+                      setSuggestions(matched);
+                      setShowSuggestions(true);
+                      setSelectedSuggestionIndex(0);
+                    } else {
+                      setShowSuggestions(false);
+                    }
+                  } else {
+                    setShowSuggestions(false);
+                  }
+
                   // Auto-resize
                   setTimeout(() => {
                     e.target.style.height = 'auto';
@@ -1279,6 +1434,47 @@ export default function ReaderPage() {
                   }, 0);
                 }}
                 onKeyDown={(e) => {
+                  // Tab 自动补全
+                  if (e.key === 'Tab') {
+                    if (showSuggestions && suggestions.length > 0) {
+                      e.preventDefault();
+                      const selected = suggestions[selectedSuggestionIndex >= 0 ? selectedSuggestionIndex : 0];
+                      if (selected) {
+                        setInput(selected);
+                        setShowSuggestions(false);
+                        setSelectedSuggestionIndex(-1);
+                      }
+                    }
+                    return;
+                  }
+
+                  // 上下箭头切换历史
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (inputHistory.length > 0) {
+                      const newIndex = historyIndex < inputHistory.length - 1 ? historyIndex + 1 : historyIndex;
+                      setHistoryIndex(newIndex);
+                      setInput(inputHistory[newIndex]);
+                      setShowSuggestions(false);
+                    }
+                    return;
+                  }
+
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (historyIndex > 0) {
+                      const newIndex = historyIndex - 1;
+                      setHistoryIndex(newIndex);
+                      setInput(inputHistory[newIndex]);
+                      setShowSuggestions(false);
+                    } else if (historyIndex === 0) {
+                      setHistoryIndex(-1);
+                      setInput('');
+                      setShowSuggestions(false);
+                    }
+                    return;
+                  }
+
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     handleSendMessage();
@@ -1289,6 +1485,27 @@ export default function ReaderPage() {
                 disabled={aiLoading}
                 rows={1}
               />
+              {/* 自动补全建议列表 */}
+              {showSuggestions && suggestions.length > 0 && (
+                <div className="absolute bottom-full left-0 right-14 mb-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto z-10">
+                  {suggestions.map((suggestion, index) => (
+                    <div
+                      key={index}
+                      className={`px-3 py-2 text-sm cursor-pointer truncate ${
+                        index === selectedSuggestionIndex
+                          ? 'bg-indigo-50 text-indigo-600'
+                          : 'hover:bg-slate-50'
+                      }`}
+                      onClick={() => {
+                        setInput(suggestion);
+                        setShowSuggestions(false);
+                      }}
+                    >
+                      {suggestion}
+                    </div>
+                  ))}
+                </div>
+              )}
               <button
                 onClick={handleSendMessage}
                 disabled={aiLoading || !input.trim()}
@@ -1300,6 +1517,44 @@ export default function ReaderPage() {
               </button>
             </div>
           </div>
+
+          {/* Edit Session Title Modal */}
+          {showEditSession && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-xl shadow-xl p-6 w-80 max-w-[90vw]">
+                <h3 className="text-lg font-semibold text-slate-800 mb-4">重命名对话</h3>
+                <input
+                  type="text"
+                  value={editingSessionTitle}
+                  onChange={(e) => setEditingSessionTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSaveSessionTitle();
+                    } else if (e.key === 'Escape') {
+                      setShowEditSession(false);
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder="输入新名称..."
+                  autoFocus
+                />
+                <div className="flex gap-2 mt-4 justify-end">
+                  <button
+                    onClick={() => setShowEditSession(false)}
+                    className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={handleSaveSessionTitle}
+                    className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                  >
+                    保存
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </aside>
       </div>
     </div>

@@ -4,6 +4,7 @@ import path from 'path';
 
 interface Session {
   id: string;
+  title: string;
   selectedBlocks: Array<{
     id: string;
     content: string;
@@ -79,6 +80,7 @@ export async function GET(
             data = {
               sessions: [{
                 id: 'default',
+                title: '对话 1',
                 selectedBlocks: notes.map((n: any) => ({
                   id: n.id,
                   content: n.content,
@@ -185,7 +187,7 @@ export async function POST(
   try {
     const { bookId, htmlFile } = await params;
     const body = await request.json();
-    const { sessionId, selectedBlocks, messages } = body;
+    const { sessionId, title, selectedBlocks, messages } = body;
 
     if (!bookId || !htmlFile) {
       return NextResponse.json(
@@ -237,6 +239,7 @@ export async function POST(
         // Create new session
         data.sessions.push({
           id: sessionId,
+          title: title || `对话 ${data.sessions.length + 1}`,
           selectedBlocks: selectedBlocks || [],
           messages: messages || [],
           timestamp: Date.now(),
