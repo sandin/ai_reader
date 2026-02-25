@@ -11,18 +11,29 @@ interface Chapter {
   href: string;
 }
 
+interface Block {
+  id: string;
+  content: string;
+  cfiRange?: string;
+  timestamp: number;
+}
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
-  content: string;
+  blocks: Block[];
+  timestamp: number;
 }
 
-interface TextBlock {
-  id: string;
-  content: string;
-  timestamp: number;
-  cfiRange?: string;
-  highlightKey?: string;
+// 转换为 langchain 消息格式的辅助函数
+function toLangChainMessages(messages: Message[]): Array<{ role: string; content: string }> {
+  return messages.map(msg => {
+    const content = msg.blocks.map(b => b.content).join('\n\n');
+    return {
+      role: msg.role,
+      content,
+    };
+  });
 }
 
 export default function ReaderPage() {
@@ -46,14 +57,16 @@ export default function ReaderPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
-  const [selectedBlocks, setSelectedBlocks] = useState<TextBlock[]>([]);
+  const [selectedBlocks, setSelectedBlocks] = useState<Block[]>([]);
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
+  const [isSelectedBlocksExpanded, setIsSelectedBlocksExpanded] = useState(false);
 
   // Floating toolbar state
   const [showToolbar, setShowToolbar] = useState(false);
   const [toolbarPosition, setToolbarPosition] = useState({ x: 0, y: 0 });
   const [currentSelection, setCurrentSelection] = useState('');
   const [currentCfiRange, setCurrentCfiRange] = useState('');
+  const [currentHighlightId, setCurrentHighlightId] = useState<string | null>(null);
 
   // Panel layout state for persistence
   const [tocWidth, setTocWidth] = useState(288); // default 72 * 4 = 288px
@@ -64,6 +77,8 @@ export default function ReaderPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
   const selectionHandlerAdded = useRef(false);
+  const isResizingRef = useRef(false);
+  const applyHighlightsRef = useRef<() => void>(() => {});
 
   // Load panel layout from localStorage
   useEffect(() => {
@@ -87,11 +102,13 @@ export default function ReaderPage() {
   // Handle left resize
   const handleMouseDownLeft = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    isResizingRef.current = true;
     setIsResizingLeft(true);
   }, []);
 
   const handleMouseDownRight = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    isResizingRef.current = true;
     setIsResizingRight(true);
   }, []);
 
@@ -117,9 +134,18 @@ export default function ReaderPage() {
       }
     };
 
-    const handleMouseUp = () => {
+    const handleMouseUp = async () => {
+      const wasResizing = isResizingRef.current;
+      isResizingRef.current = false;
       setIsResizingLeft(false);
       setIsResizingRight(false);
+
+      // Re-apply highlights after resize
+      if (wasResizing && rendition && currentChapter) {
+        await rendition.display(currentChapter);
+        // Wait for content to render then apply highlights
+        setTimeout(() => applyHighlightsRef.current(), 100);
+      }
     };
 
     if (isResizingLeft || isResizingRight) {
@@ -131,7 +157,7 @@ export default function ReaderPage() {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizingLeft, isResizingRight]);
+  }, [currentChapter, rendition, isResizingLeft, isResizingRight]);
 
   // Load font size from localStorage
   useEffect(() => {
@@ -343,11 +369,29 @@ export default function ReaderPage() {
 
               if (iframe && iframe.contentWindow) {
                 const win = iframe.contentWindow;
-                win.addEventListener('mouseup', () => {
+                win.addEventListener('mouseup', (e: MouseEvent) => {
                   setTimeout(() => {
                     const selection = win.getSelection();
                     const selectedText = selection ? selection.toString().trim() : '';
-                    if (selectedText) {
+
+                    // Check if clicking on a highlight
+                    const target = e.target as HTMLElement;
+                    const highlightSpan = target.closest('span[data-highlight-id]');
+                    const highlightId = highlightSpan?.getAttribute('data-highlight-id');
+
+                    if (highlightId) {
+                      // Clicked on a highlight - show "取消选中" option
+                      const rect = (highlightSpan as HTMLElement).getBoundingClientRect();
+                      const iframeRect = iframe.getBoundingClientRect();
+                      setToolbarPosition({
+                        x: iframeRect.left + rect.left + rect.width / 2,
+                        y: iframeRect.top + rect.top - 10
+                      });
+                      setCurrentHighlightId(highlightId);
+                      setCurrentSelection('');
+                      setShowToolbar(true);
+                    } else if (selectedText) {
+                      // Normal text selection
                       if (selection && selection.rangeCount > 0) {
                         const range = selection.getRangeAt(0);
                         const rect = range.getBoundingClientRect();
@@ -357,6 +401,7 @@ export default function ReaderPage() {
                           y: iframeRect.top + rect.top - 10
                         });
                         setCurrentSelection(selectedText);
+                        setCurrentHighlightId(null);
                         setShowToolbar(true);
                       }
                     }
@@ -417,8 +462,20 @@ export default function ReaderPage() {
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: input,
+      blocks: [{
+        id: Date.now().toString(),
+        content: input,
+        timestamp: Date.now(),
+      }],
+      timestamp: Date.now(),
     };
+
+    // 将当前消息添加到消息列表（包括选中的 blocks）
+    const allMessages = [...messages, userMessage];
+
+    // 转换为 langchain 消息格式
+    const langChainMessages = toLangChainMessages(allMessages);
+    console.log('LangChain messages:', langChainMessages);
 
     setMessages(prev => [...prev, userMessage]);
     setInput('');
@@ -428,7 +485,12 @@ export default function ReaderPage() {
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: '这是一个 AI 对话功能的占位符。您可以集成自己的 AI API 来实现实际的对话功能。',
+        blocks: [{
+          id: (Date.now() + 1).toString(),
+          content: '这是一个 AI 对话功能的占位符。您可以集成自己的 AI API 来实现实际的对话功能。',
+          timestamp: Date.now(),
+        }],
+        timestamp: Date.now(),
       };
       setMessages(prev => [...prev, assistantMessage]);
       setAiLoading(false);
@@ -446,6 +508,100 @@ export default function ReaderPage() {
       }
     }
   };
+
+  // Apply highlights to the DOM based on selectedBlocks
+  const applyHighlights = useCallback(() => {
+    if (!rendition || selectedBlocks.length === 0) return;
+
+    const container = viewerRef.current;
+    const iframe = container?.querySelector('iframe');
+    if (!iframe || !iframe.contentWindow) return;
+
+    const win = iframe.contentWindow;
+
+    // Skip if already highlighted
+    if (win.document.querySelector('span[data-highlight-id]')) return;
+
+    // Use TreeWalker to find text nodes and highlight them
+    const walker = win.document.createTreeWalker(
+      win.document.body,
+      1, // NodeFilter.SHOW_TEXT
+      null
+    );
+
+    const blocksToHighlight = [...selectedBlocks];
+    let node: Node | null;
+
+    while ((node = walker.nextNode()) && blocksToHighlight.length > 0) {
+      const text = node.textContent || '';
+      const parent = node.parentNode as HTMLElement;
+
+      // Skip if already in a highlight span
+      if (parent?.dataset?.highlightId) continue;
+
+      for (let i = 0; i < blocksToHighlight.length; i++) {
+        const block = blocksToHighlight[i];
+        const searchText = block.content;
+        const index = text.indexOf(searchText);
+
+        if (index !== -1) {
+          try {
+            const range = win.document.createRange();
+            range.setStart(node, index);
+            range.setEnd(node, index + searchText.length);
+
+            const span = win.document.createElement('span');
+            span.style.backgroundColor = '#fef08a';
+            span.style.borderRadius = '2px';
+            span.dataset.highlightId = block.id;
+
+            span.appendChild(range.extractContents());
+            range.insertNode(span);
+
+            // Remove from list after successful highlight
+            blocksToHighlight.splice(i, 1);
+            break;
+          } catch (e) {
+            // Continue if highlighting fails
+          }
+        }
+      }
+    }
+  }, [rendition, selectedBlocks]);
+
+  // Keep the ref updated
+  applyHighlightsRef.current = applyHighlights;
+
+  // Apply highlights when chapter changes
+  useEffect(() => {
+    if (currentChapter && selectedBlocks.length > 0 && rendition) {
+      // Wait for rendition to finish rendering
+      const timer = setTimeout(() => {
+        applyHighlights();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [currentChapter, selectedBlocks.length, rendition, applyHighlights]);
+
+  // Re-apply highlights when window is resized
+  useEffect(() => {
+    let resizeTimer: NodeJS.Timeout;
+
+    const handleWindowResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (selectedBlocks.length > 0 && rendition) {
+          applyHighlightsRef.current();
+        }
+      }, 300);
+    };
+
+    window.addEventListener('resize', handleWindowResize);
+    return () => {
+      window.removeEventListener('resize', handleWindowResize);
+      clearTimeout(resizeTimer);
+    };
+  }, [selectedBlocks.length, rendition]);
 
   // Handle add to AI assistant
   const handleAddToAssistant = () => {
@@ -465,14 +621,16 @@ export default function ReaderPage() {
             span.style.backgroundColor = '#fef08a';
             span.style.borderRadius = '2px';
             span.dataset.highlightId = blockId;
-            range.surroundContents(span);
+            // Use a safer method to highlight - extract content and wrap it
+            span.appendChild(range.extractContents());
+            range.insertNode(span);
           } catch (err) {
             console.error('Failed to highlight:', err);
           }
         }
       }
 
-      const newBlock: TextBlock = {
+      const newBlock: Block = {
         id: blockId,
         content: currentSelection,
         timestamp: Date.now(),
@@ -510,6 +668,11 @@ export default function ReaderPage() {
       next.delete(id);
       return next;
     });
+
+    // Hide toolbar after removing block
+    setShowToolbar(false);
+    setCurrentHighlightId(null);
+    setCurrentSelection('');
   };
 
   // Handle toggle block expand/collapse
@@ -526,9 +689,29 @@ export default function ReaderPage() {
   };
 
   // Hide toolbar when clicking outside
-  const handleClickOutside = () => {
+  const handleClickOutside = useCallback(() => {
     setShowToolbar(false);
-  };
+    setCurrentHighlightId(null);
+    setCurrentSelection('');
+  }, []);
+
+  useEffect(() => {
+    if (showToolbar) {
+      const handleDocumentClick = (e: MouseEvent) => {
+        // Don't hide if clicking on the toolbar itself
+        const target = e.target as HTMLElement;
+        if (target.closest('.fixed.z-50')) {
+          return;
+        }
+        handleClickOutside();
+      };
+
+      document.addEventListener('click', handleDocumentClick);
+      return () => {
+        document.removeEventListener('click', handleDocumentClick);
+      };
+    }
+  }, [showToolbar, handleClickOutside]);
 
   if (loading) {
     return (
@@ -666,8 +849,8 @@ export default function ReaderPage() {
 
         {/* Main reader area */}
         <main className="flex-1 bg-white overflow-y-auto relative">
-          {/* Floating toolbar for text selection */}
-          {showToolbar && currentSelection && (
+          {/* Floating toolbar for text selection or highlight */}
+          {showToolbar && (
             <div
               className="fixed z-50 flex items-center gap-1 bg-white rounded-lg shadow-lg border border-slate-200 p-1"
               style={{
@@ -676,27 +859,44 @@ export default function ReaderPage() {
                 transform: 'translate(-50%, -100%)',
               }}
             >
-              <button
-                onClick={handleCopyToClipboard}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
-                title="复制到剪贴板"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                <span>复制</span>
-              </button>
-              <div className="w-px h-5 bg-slate-200"></div>
-              <button
-                onClick={handleAddToAssistant}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
-                title="发送到AI助手"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-                <span>选中</span>
-              </button>
+              {currentHighlightId ? (
+                // Show "取消选中" when clicking on a highlight
+                <button
+                  onClick={() => handleRemoveBlock(currentHighlightId!)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                  title="取消选中"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  <span>取消选中</span>
+                </button>
+              ) : (
+                // Show "复制" and "选中" for normal text selection
+                <>
+                  <button
+                    onClick={handleCopyToClipboard}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
+                    title="复制到剪贴板"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    <span>复制</span>
+                  </button>
+                  <div className="w-px h-5 bg-slate-200"></div>
+                  <button
+                    onClick={handleAddToAssistant}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                    title="发送到AI助手"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                    <span>选中</span>
+                  </button>
+                </>
+              )}
             </div>
           )}
 
@@ -779,52 +979,65 @@ export default function ReaderPage() {
             </div>
           </div>
 
-          {/* Selected text blocks */}
+          {/* Selected text blocks - always show title, content is collapsible */}
           {selectedBlocks.length > 0 && (
-            <div className="p-4 border-b border-slate-100 bg-slate-50 flex-1 overflow-hidden flex flex-col min-h-0">
-              <div className="flex items-center justify-between mb-3 shrink-0">
+            <div className="border-b border-slate-100 bg-slate-50">
+              <button
+                onClick={() => setIsSelectedBlocksExpanded(!isSelectedBlocksExpanded)}
+                className="flex items-center justify-between w-full px-4 py-2"
+              >
                 <h3 className="text-sm font-medium text-slate-700">选中的文字 ({selectedBlocks.length})</h3>
-              </div>
-              <div className="space-y-2 overflow-y-auto flex-1 min-h-0">
-                {selectedBlocks.map((block) => {
-                  const isExpanded = expandedBlocks.has(block.id);
-                  const shouldTruncate = block.content.length > 200;
-                  const displayContent = !isExpanded && shouldTruncate
-                    ? block.content.slice(0, 200) + '...'
-                    : block.content;
+                <svg
+                  className={`w-4 h-4 text-slate-400 transition-transform ${isSelectedBlocksExpanded ? 'rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {isSelectedBlocksExpanded && (
+                <div className="px-4 pb-4 space-y-2 overflow-y-auto">
+                  {selectedBlocks.map((block) => {
+                    const isExpanded = expandedBlocks.has(block.id);
+                    const shouldTruncate = block.content.length > 200;
+                    const displayContent = !isExpanded && shouldTruncate
+                      ? block.content.slice(0, 200) + '...'
+                      : block.content;
 
-                  return (
-                    <div
-                      key={block.id}
-                      className="relative bg-white border border-slate-200 rounded-lg p-3 text-sm text-slate-700 hover:border-indigo-300 transition-colors"
-                    >
-                      <p className="whitespace-pre-wrap break-words">{displayContent}</p>
-                      <div className="absolute top-2 right-2 flex items-center gap-1">
-                        {shouldTruncate && (
+                    return (
+                      <div
+                        key={block.id}
+                        className="relative bg-white border border-slate-200 rounded-lg p-3 text-sm text-slate-700 hover:border-indigo-300 transition-colors"
+                      >
+                        <p className="whitespace-pre-wrap break-words">{displayContent}</p>
+                        <div className="absolute top-2 right-2 flex items-center gap-1">
+                          {shouldTruncate && (
+                            <button
+                              onClick={() => handleToggleExpand(block.id)}
+                              className="w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-indigo-500 hover:bg-indigo-50"
+                              title={isExpanded ? '收起' : '展开'}
+                            >
+                              <svg className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                              </svg>
+                            </button>
+                          )}
                           <button
-                            onClick={() => handleToggleExpand(block.id)}
-                            className="w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-indigo-500 hover:bg-indigo-50"
-                            title={isExpanded ? '收起' : '展开'}
+                            onClick={() => handleRemoveBlock(block.id)}
+                            className="w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50"
+                            title="删除"
                           >
-                            <svg className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                             </svg>
                           </button>
-                        )}
-                        <button
-                          onClick={() => handleRemoveBlock(block.id)}
-                          className="w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50"
-                          title="删除"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -853,7 +1066,7 @@ export default function ReaderPage() {
                         : 'bg-slate-100 text-slate-800 rounded-bl-md'
                     }`}
                   >
-                    {msg.content}
+                    {msg.blocks.map(b => b.content).join('\n\n')}
                   </div>
                 </div>
               ))
