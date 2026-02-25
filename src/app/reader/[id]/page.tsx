@@ -17,6 +17,14 @@ interface Message {
   content: string;
 }
 
+interface TextBlock {
+  id: string;
+  content: string;
+  timestamp: number;
+  cfiRange?: string;
+  highlightKey?: string;
+}
+
 export default function ReaderPage() {
   const params = useParams();
   const bookId = params.id as string;
@@ -38,6 +46,14 @@ export default function ReaderPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const [selectedBlocks, setSelectedBlocks] = useState<TextBlock[]>([]);
+  const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
+
+  // Floating toolbar state
+  const [showToolbar, setShowToolbar] = useState(false);
+  const [toolbarPosition, setToolbarPosition] = useState({ x: 0, y: 0 });
+  const [currentSelection, setCurrentSelection] = useState('');
+  const [currentCfiRange, setCurrentCfiRange] = useState('');
 
   // Panel layout state for persistence
   const [tocWidth, setTocWidth] = useState(288); // default 72 * 4 = 288px
@@ -47,6 +63,7 @@ export default function ReaderPage() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
+  const selectionHandlerAdded = useRef(false);
 
   // Load panel layout from localStorage
   useEffect(() => {
@@ -130,6 +147,21 @@ export default function ReaderPage() {
     setFontSize(clamped);
     localStorage.setItem('reader-font-size', clamped.toString());
   };
+
+  // Hide toolbar when clicking outside
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) {
+        setShowToolbar(false);
+      }
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, []);
 
   useEffect(() => {
     let bookInstance: Book | null = null;
@@ -275,7 +307,6 @@ export default function ReaderPage() {
 
     // Get spine items for this chapter
     const items = getSpineItemsForHref(href);
-    console.log("items", items);
     setSpineItems(items);
     setCurrentSpineIndex(0);
 
@@ -298,6 +329,52 @@ export default function ReaderPage() {
           setCurrentChapter(location.start.href);
         });
 
+        // Handle text selection via mouseup event
+        if (!selectionHandlerAdded.current) {
+          selectionHandlerAdded.current = true;
+          renditionInstance.on('rendered', () => {
+            // Try to find iframe in the rendition's container
+            const tryBind = (attempts: number) => {
+              if (attempts <= 0) return;
+
+              // Find iframe in the viewer container
+              const container = viewerRef.current;
+              const iframe = container?.querySelector('iframe');
+
+              if (iframe && iframe.contentWindow) {
+                const win = iframe.contentWindow;
+                win.addEventListener('mouseup', () => {
+                  setTimeout(() => {
+                    const selection = win.getSelection();
+                    const selectedText = selection ? selection.toString().trim() : '';
+                    if (selectedText) {
+                      if (selection && selection.rangeCount > 0) {
+                        const range = selection.getRangeAt(0);
+                        const rect = range.getBoundingClientRect();
+                        const iframeRect = iframe.getBoundingClientRect();
+                        setToolbarPosition({
+                          x: iframeRect.left + rect.left + rect.width / 2,
+                          y: iframeRect.top + rect.top - 10
+                        });
+                        setCurrentSelection(selectedText);
+                        setShowToolbar(true);
+                      }
+                    }
+                  }, 10);
+                });
+
+                // Also listen to epubjs selected event to get CFI
+                renditionInstance.on('selected', (cfiRange: string) => {
+                  setCurrentCfiRange(cfiRange);
+                });
+              } else {
+                setTimeout(() => tryBind(attempts - 1), 500);
+              }
+            };
+            tryBind(5);
+          });
+        }
+
         setRendition(renditionInstance);
         await renditionInstance.display(href);
       }
@@ -310,13 +387,11 @@ export default function ReaderPage() {
 
   // Navigate to previous spine item
   const handlePrevPage = useCallback(async () => {
-    console.log('handlePrevPage:', { currentSpineIndex, spineItems, rendition: !!rendition });
     if (currentSpineIndex > 0 && rendition) {
       const newIndex = currentSpineIndex - 1;
       setCurrentSpineIndex(newIndex);
       try {
         await rendition.display(spineItems[newIndex]);
-        console.log('Displayed prev:', spineItems[newIndex]);
       } catch (err) {
         console.error('Error displaying prev:', err);
       }
@@ -325,18 +400,14 @@ export default function ReaderPage() {
 
   // Navigate to next spine item
   const handleNextPage = useCallback(async () => {
-    console.log('handleNextPage:', { currentSpineIndex, spineItemsLength: spineItems.length, rendition: !!rendition });
     if (currentSpineIndex < spineItems.length - 1 && rendition) {
       const newIndex = currentSpineIndex + 1;
       setCurrentSpineIndex(newIndex);
       try {
         await rendition.display(spineItems[newIndex]);
-        console.log('Displayed next:', spineItems[newIndex]);
       } catch (err) {
         console.error('Error displaying next:', err);
       }
-    } else {
-      console.log('Condition failed:', currentSpineIndex >= spineItems.length - 1, !rendition);
     }
   }, [currentSpineIndex, spineItems, rendition]);
 
@@ -364,11 +435,99 @@ export default function ReaderPage() {
     }, 1000);
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
+  // Handle copy to clipboard
+  const handleCopyToClipboard = async () => {
+    if (currentSelection) {
+      try {
+        await navigator.clipboard.writeText(currentSelection);
+        setShowToolbar(false);
+      } catch (err) {
+        console.error('Failed to copy:', err);
+      }
     }
+  };
+
+  // Handle add to AI assistant
+  const handleAddToAssistant = () => {
+    if (currentSelection && rendition) {
+      const blockId = Date.now().toString();
+
+      // Get the iframe and highlight the selection using DOM
+      const container = viewerRef.current;
+      const iframe = container?.querySelector('iframe');
+      if (iframe && iframe.contentWindow) {
+        const win = iframe.contentWindow;
+        const selection = win.getSelection();
+        if (selection && selection.rangeCount > 0) {
+          try {
+            const range = selection.getRangeAt(0);
+            const span = win.document.createElement('span');
+            span.style.backgroundColor = '#fef08a';
+            span.style.borderRadius = '2px';
+            span.dataset.highlightId = blockId;
+            range.surroundContents(span);
+          } catch (err) {
+            console.error('Failed to highlight:', err);
+          }
+        }
+      }
+
+      const newBlock: TextBlock = {
+        id: blockId,
+        content: currentSelection,
+        timestamp: Date.now(),
+        cfiRange: currentCfiRange,
+      };
+
+      setSelectedBlocks(prev => [...prev, newBlock]);
+      setShowToolbar(false);
+    }
+  };
+
+  // Handle remove block
+  const handleRemoveBlock = (id: string) => {
+    // Remove highlight from DOM
+    const container = viewerRef.current;
+    const iframe = container?.querySelector('iframe');
+    if (iframe && iframe.contentWindow) {
+      const win = iframe.contentWindow;
+      const highlightEl = win.document.querySelector(`span[data-highlight-id="${id}"]`);
+      if (highlightEl) {
+        const parent = highlightEl.parentNode;
+        if (parent) {
+          // Replace the span with its text content
+          while (highlightEl.firstChild) {
+            parent.insertBefore(highlightEl.firstChild, highlightEl);
+          }
+          parent.removeChild(highlightEl);
+        }
+      }
+    }
+
+    setSelectedBlocks(prev => prev.filter(b => b.id !== id));
+    setExpandedBlocks(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
+
+  // Handle toggle block expand/collapse
+  const handleToggleExpand = (id: string) => {
+    setExpandedBlocks(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  // Hide toolbar when clicking outside
+  const handleClickOutside = () => {
+    setShowToolbar(false);
   };
 
   if (loading) {
@@ -506,7 +665,41 @@ export default function ReaderPage() {
         )}
 
         {/* Main reader area */}
-        <main className="flex-1 bg-white overflow-y-auto">
+        <main className="flex-1 bg-white overflow-y-auto relative">
+          {/* Floating toolbar for text selection */}
+          {showToolbar && currentSelection && (
+            <div
+              className="fixed z-50 flex items-center gap-1 bg-white rounded-lg shadow-lg border border-slate-200 p-1"
+              style={{
+                left: toolbarPosition.x,
+                top: toolbarPosition.y,
+                transform: 'translate(-50%, -100%)',
+              }}
+            >
+              <button
+                onClick={handleCopyToClipboard}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
+                title="复制到剪贴板"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <span>复制</span>
+              </button>
+              <div className="w-px h-5 bg-slate-200"></div>
+              <button
+                onClick={handleAddToAssistant}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                title="发送到AI助手"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                <span>选中</span>
+              </button>
+            </div>
+          )}
+
           {/* Current chapter indicator and navigation */}
           {(currentChapterTitle || selectedChapter) && (
             <div className="sticky top-0 bg-white/90 backdrop-blur-sm border-b border-slate-100 px-6 py-2 z-10 flex items-center justify-between">
@@ -586,9 +779,58 @@ export default function ReaderPage() {
             </div>
           </div>
 
+          {/* Selected text blocks */}
+          {selectedBlocks.length > 0 && (
+            <div className="p-4 border-b border-slate-100 bg-slate-50 flex-1 overflow-hidden flex flex-col min-h-0">
+              <div className="flex items-center justify-between mb-3 shrink-0">
+                <h3 className="text-sm font-medium text-slate-700">选中的文字 ({selectedBlocks.length})</h3>
+              </div>
+              <div className="space-y-2 overflow-y-auto flex-1 min-h-0">
+                {selectedBlocks.map((block) => {
+                  const isExpanded = expandedBlocks.has(block.id);
+                  const shouldTruncate = block.content.length > 200;
+                  const displayContent = !isExpanded && shouldTruncate
+                    ? block.content.slice(0, 200) + '...'
+                    : block.content;
+
+                  return (
+                    <div
+                      key={block.id}
+                      className="relative bg-white border border-slate-200 rounded-lg p-3 text-sm text-slate-700 hover:border-indigo-300 transition-colors"
+                    >
+                      <p className="whitespace-pre-wrap break-words">{displayContent}</p>
+                      <div className="absolute top-2 right-2 flex items-center gap-1">
+                        {shouldTruncate && (
+                          <button
+                            onClick={() => handleToggleExpand(block.id)}
+                            className="w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-indigo-500 hover:bg-indigo-50"
+                            title={isExpanded ? '收起' : '展开'}
+                          >
+                            <svg className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleRemoveBlock(block.id)}
+                          className="w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50"
+                          title="删除"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.length === 0 ? (
+          <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${selectedBlocks.length > 0 ? 'min-h-0' : ''}`}>
+            {messages.length === 0 && selectedBlocks.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center">
                 <div className="w-16 h-16 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-full flex items-center justify-center mb-4">
                   <svg className="w-8 h-8 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -631,20 +873,38 @@ export default function ReaderPage() {
 
           {/* Input area */}
           <div className="p-4 border-t border-slate-100 bg-slate-50">
-            <div className="flex gap-2">
-              <input
-                type="text"
+            <div className="flex gap-2 items-end">
+              <textarea
+                ref={(el) => {
+                  if (el) {
+                    el.style.height = 'auto';
+                    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+                  }
+                }}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyPress={handleKeyPress}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  // Auto-resize
+                  setTimeout(() => {
+                    e.target.style.height = 'auto';
+                    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                  }, 0);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMessage();
+                  }
+                }}
                 placeholder="输入问题..."
-                className="flex-1 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow"
+                className="flex-1 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow resize-none overflow-hidden"
                 disabled={aiLoading}
+                rows={1}
               />
               <button
                 onClick={handleSendMessage}
                 disabled={aiLoading || !input.trim()}
-                className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl text-sm font-medium hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow"
+                className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl text-sm font-medium hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow shrink-0"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
