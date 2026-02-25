@@ -537,33 +537,19 @@ export default function ReaderPage() {
         content: msg.blocks.map(b => b.content).join('\n\n'),
       }));
 
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: userContent,
-          history,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to get response');
-      }
-
-      const data = await response.json();
-
+      // 创建初始的空 assistant 消息用于流式更新
+      const assistantMessageId = (Date.now() + 1).toString();
       const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: assistantMessageId,
         role: 'assistant',
         blocks: [{
-          id: (Date.now() + 1).toString(),
-          content: data.content,
+          id: assistantMessageId,
+          content: '',
           timestamp: Date.now(),
         }],
         timestamp: Date.now(),
       };
+
       const newMessages = [...messages, userMessage, assistantMessage];
       setMessages(newMessages);
 
@@ -589,8 +575,93 @@ export default function ReaderPage() {
         ));
       }
 
+      // 使用流式 fetch
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: userContent,
+          history,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to get response');
+      }
+
+      if (!response.body) {
+        throw new Error('No response body');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedContent = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.content) {
+                accumulatedContent += parsed.content;
+                // 实时更新消息内容
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? {
+                        ...msg,
+                        blocks: [{
+                          ...msg.blocks[0],
+                          content: accumulatedContent,
+                        }],
+                      }
+                    : msg
+                ));
+              }
+              if (parsed.error) {
+                throw new Error(parsed.error);
+              }
+            } catch (e) {
+              // 忽略解析错误
+            }
+          }
+        }
+      }
+
+      // 最终保存会话
+      const finalMessages = newMessages.map(msg =>
+        msg.id === assistantMessageId
+          ? {
+              ...msg,
+              blocks: [{
+                ...msg.blocks[0],
+                content: accumulatedContent,
+              }],
+            }
+          : msg
+      );
+
+      // Update session with final messages
+      if (sessionId) {
+        setSessions(prev => prev.map(s =>
+          s.id === sessionId
+            ? { ...s, messages: finalMessages, timestamp: Date.now() }
+            : s
+        ));
+      }
+
       // Save current session with the new messages
-      await saveCurrentSession(newMessages);
+      await saveCurrentSession(finalMessages);
     } catch (err) {
       console.error('Error calling LLM:', err);
       const errorData = err instanceof Error ? err.message : String(err);
@@ -874,6 +945,59 @@ export default function ReaderPage() {
     }
   };
 
+  // Handle add to AI assistant with new conversation
+  const handleAddToAssistantNewChat = async () => {
+    if (contextMenuSelection && rendition) {
+      const blockId = Date.now().toString();
+
+      const newBlock: Block = {
+        id: blockId,
+        content: contextMenuSelection,
+        timestamp: Date.now(),
+        cfiRange: contextMenuCfiRange,
+      };
+
+      // Always create a new session
+      const newSessionId = Date.now().toString();
+      const newSelectedBlocks = [newBlock];
+
+      setCurrentSessionId(newSessionId);
+      setMessages([]);
+      setSelectedBlocks(newSelectedBlocks);
+
+      const newSession = {
+        id: newSessionId,
+        title: `对话 ${sessions.length + 1}`,
+        selectedBlocks: newSelectedBlocks,
+        messages: [],
+        timestamp: Date.now(),
+      };
+
+      setSessions(prev => [...prev, newSession]);
+      setShowContextMenu(false);
+
+      // Save to local JSON file via API
+      try {
+        const htmlFile = currentChapter.split('#')[0];
+        const encodedHtmlFile = encodeURIComponent(htmlFile);
+
+        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sessionId: newSessionId,
+            selectedBlocks: newSelectedBlocks,
+            messages: [],
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to save note:', err);
+      }
+    }
+  };
+
   // Handle remove block
   const handleRemoveBlock = async (id: string) => {
     // Remove from local state
@@ -1117,6 +1241,15 @@ export default function ReaderPage() {
                 </svg>
                 <span>选中</span>
               </button>
+              <button
+                onClick={handleAddToAssistantNewChat}
+                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-green-600 hover:bg-green-50 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                <span>选中并创建新对话</span>
+              </button>
             </div>
           )}
 
@@ -1212,7 +1345,7 @@ export default function ReaderPage() {
           {sessions.length > 0 && (
             <div className="border-b border-slate-100 overflow-x-auto">
               <div className="flex gap-1 px-2 py-2 min-w-max">
-                {sessions.map((session, index) => (
+                {sessions.slice().sort((a, b) => a.timestamp - b.timestamp).map((session) => (
                   <div
                     key={session.id}
                     className={`flex items-center gap-1 pr-1 rounded-lg text-xs whitespace-nowrap transition-colors ${
@@ -1342,31 +1475,51 @@ export default function ReaderPage() {
                     }`}
                   >
                     {msg.role === 'assistant' ? (
-                      <ReactMarkdown
-                        components={{
-                          p: ({ children }) => <p className="mb-2">{children}</p>,
-                          ul: ({ children }) => <ul className="list-disc ml-4 mb-2">{children}</ul>,
-                          ol: ({ children }) => <ol className="list-decimal ml-4 mb-2">{children}</ol>,
-                          li: ({ children }) => <li className="mb-1">{children}</li>,
-                          code: ({ className, children }) => {
-                            const isInline = !className;
-                            return isInline ? (
-                              <code className="bg-slate-200 px-1 py-0.5 rounded text-xs">{children}</code>
-                            ) : (
-                              <code className={`${className} block bg-slate-800 text-slate-100 p-2 rounded-lg overflow-x-auto mb-2 text-xs`}>
-                                {children}
-                              </code>
-                            );
-                          },
-                          pre: ({ children }) => <pre className="mb-2">{children}</pre>,
-                          h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
-                          h2: ({ children }) => <h2 className="text-base font-bold mb-1">{children}</h2>,
-                          h3: ({ children }) => <h3 className="text-sm font-bold mb-1">{children}</h3>,
-                          blockquote: ({ children }) => <blockquote className="border-l-2 border-slate-300 pl-2 italic mb-2">{children}</blockquote>,
-                        }}
-                      >
-                        {msg.blocks.map(b => b.content).join('\n\n')}
-                      </ReactMarkdown>
+                      (() => {
+                        const content = msg.blocks.map(b => b.content).join('\n\n');
+                        const isStreaming = aiLoading && index === messages.length - 1;
+
+                        if (isStreaming && !content) {
+                          // Show loading indicator inside the streaming message
+                          return (
+                            <div className="flex items-center gap-2">
+                              <div className="flex gap-1">
+                                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <ReactMarkdown
+                            components={{
+                              p: ({ children }) => <p className="mb-2">{children}</p>,
+                              ul: ({ children }) => <ul className="list-disc ml-4 mb-2">{children}</ul>,
+                              ol: ({ children }) => <ol className="list-decimal ml-4 mb-2">{children}</ol>,
+                              li: ({ children }) => <li className="mb-1">{children}</li>,
+                              code: ({ className, children }) => {
+                                const isInline = !className;
+                                return isInline ? (
+                                  <code className="bg-slate-200 px-1 py-0.5 rounded text-xs">{children}</code>
+                                ) : (
+                                  <code className={`${className} block bg-slate-800 text-slate-100 p-2 rounded-lg overflow-x-auto mb-2 text-xs`}>
+                                    {children}
+                                  </code>
+                                );
+                              },
+                              pre: ({ children }) => <pre className="mb-2">{children}</pre>,
+                              h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
+                              h2: ({ children }) => <h2 className="text-base font-bold mb-1">{children}</h2>,
+                              h3: ({ children }) => <h3 className="text-sm font-bold mb-1">{children}</h3>,
+                              blockquote: ({ children }) => <blockquote className="border-l-2 border-slate-300 pl-2 italic mb-2">{children}</blockquote>,
+                            }}
+                          >
+                            {content}
+                          </ReactMarkdown>
+                        );
+                      })()
                     ) : (
                       // 如果是第一条用户消息，隐藏"选中文本："部分
                       (() => {
@@ -1383,17 +1536,7 @@ export default function ReaderPage() {
                 </div>
               ))
             )}
-            {aiLoading && (
-              <div className="mr-8">
-                <div className="px-4 py-3 rounded-2xl rounded-bl-md text-sm bg-slate-100 text-slate-500 flex items-center gap-2">
-                  <div className="flex gap-1">
-                    <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                    <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                    <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Loading indicator is now integrated into streaming message - no separate loading shown */}
           </div>
 
           {/* Input area */}

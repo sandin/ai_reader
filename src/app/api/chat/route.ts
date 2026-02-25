@@ -78,11 +78,39 @@ export async function POST(req: NextRequest) {
     // 添加当前用户消息
     messages.push(new HumanMessage(userContent));
 
-    // 在 invoke 时传递 callbacks
-    const response = await chat.invoke(messages, { callbacks });
+    // 使用流式响应
+    const encoder = new TextEncoder();
 
-    return NextResponse.json({
-      content: response.content,
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          // 使用 stream 方法进行流式输出
+          const streamIterable = await chat.stream(messages, { callbacks });
+
+          for await (const chunk of streamIterable) {
+            const content = chunk.content;
+            if (content) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+            }
+          }
+
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        } catch (error) {
+          console.error('Error in stream:', error);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`));
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
     });
   } catch (error) {
     console.error('Error calling LLM:', error);
