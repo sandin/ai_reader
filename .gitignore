@@ -42,5 +42,6 @@ next-env.d.ts
 
 # book
 /book
+/notes
 
 /prompt.md

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import ePub, { Book, Rendition, NavItem } from 'epubjs';
+import ReactMarkdown from 'react-markdown';
 
 interface Chapter {
   id: string;
@@ -25,16 +26,6 @@ interface Message {
   timestamp: number;
 }
 
-// 转换为 langchain 消息格式的辅助函数
-function toLangChainMessages(messages: Message[]): Array<{ role: string; content: string }> {
-  return messages.map(msg => {
-    const content = msg.blocks.map(b => b.content).join('\n\n');
-    return {
-      role: msg.role,
-      content,
-    };
-  });
-}
 
 export default function ReaderPage() {
   const params = useParams();
@@ -61,12 +52,20 @@ export default function ReaderPage() {
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
   const [isSelectedBlocksExpanded, setIsSelectedBlocksExpanded] = useState(false);
 
-  // Floating toolbar state
-  const [showToolbar, setShowToolbar] = useState(false);
-  const [toolbarPosition, setToolbarPosition] = useState({ x: 0, y: 0 });
-  const [currentSelection, setCurrentSelection] = useState('');
-  const [currentCfiRange, setCurrentCfiRange] = useState('');
-  const [currentHighlightId, setCurrentHighlightId] = useState<string | null>(null);
+  // Session management
+  const [sessions, setSessions] = useState<Array<{
+    id: string;
+    selectedBlocks: Block[];
+    messages: Message[];
+    timestamp: number;
+  }>>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+
+  // Context menu state
+  const [showContextMenu, setShowContextMenu] = useState(false);
+  const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
+  const [contextMenuSelection, setContextMenuSelection] = useState('');
+  const [contextMenuCfiRange, setContextMenuCfiRange] = useState('');
 
   // Panel layout state for persistence
   const [tocWidth, setTocWidth] = useState(288); // default 72 * 4 = 288px
@@ -78,7 +77,6 @@ export default function ReaderPage() {
   const viewerRef = useRef<HTMLDivElement>(null);
   const selectionHandlerAdded = useRef(false);
   const isResizingRef = useRef(false);
-  const applyHighlightsRef = useRef<() => void>(() => {});
 
   // Load panel layout from localStorage
   useEffect(() => {
@@ -135,17 +133,9 @@ export default function ReaderPage() {
     };
 
     const handleMouseUp = async () => {
-      const wasResizing = isResizingRef.current;
       isResizingRef.current = false;
       setIsResizingLeft(false);
       setIsResizingRight(false);
-
-      // Re-apply highlights after resize
-      if (wasResizing && rendition && currentChapter) {
-        await rendition.display(currentChapter);
-        // Wait for content to render then apply highlights
-        setTimeout(() => applyHighlightsRef.current(), 100);
-      }
     };
 
     if (isResizingLeft || isResizingRight) {
@@ -174,12 +164,12 @@ export default function ReaderPage() {
     localStorage.setItem('reader-font-size', clamped.toString());
   };
 
-  // Hide toolbar when clicking outside
+  // Hide context menu when selection changes
   useEffect(() => {
     const handleSelectionChange = () => {
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed) {
-        setShowToolbar(false);
+        setShowContextMenu(false);
       }
     };
 
@@ -369,48 +359,64 @@ export default function ReaderPage() {
 
               if (iframe && iframe.contentWindow) {
                 const win = iframe.contentWindow;
-                win.addEventListener('mouseup', (e: MouseEvent) => {
+
+                // Load notes when rendered (directly call, not via ref)
+                setTimeout(() => {
+                  // Call loadNotesForChapter directly since it's in scope
+                  if (bookId) {
+                    const htmlFile = href.split('#')[0];
+                    const encodedHtmlFile = encodeURIComponent(htmlFile);
+                    fetch(`/api/note/${bookId}/${encodedHtmlFile}`)
+                      .then(res => res.json())
+                      .then(data => {
+                        // Load from sessions (new format)
+                        if (data.sessions && data.sessions.length > 0) {
+                          const loadedSessions = data.sessions.map((session: any) => ({
+                            id: session.id,
+                            selectedBlocks: session.selectedBlocks || [],
+                            messages: session.messages || [],
+                            timestamp: session.timestamp,
+                          }));
+                          setSessions(loadedSessions);
+                          const mostRecent = loadedSessions.sort((a: any, b: any) => b.timestamp - a.timestamp)[0];
+                          setCurrentSessionId(mostRecent.id);
+                          setMessages(mostRecent.messages || []);
+                          setSelectedBlocks(mostRecent.selectedBlocks || []);
+                        } else {
+                          setSessions([]);
+                          setCurrentSessionId(null);
+                          setMessages([]);
+                          setSelectedBlocks([]);
+                        }
+                      })
+                      .catch(err => console.error('Failed to load notes:', err));
+                  }
+                }, 100);
+
+                // Handle right-click to show context menu
+                win.addEventListener('contextmenu', (e: MouseEvent) => {
+                  e.preventDefault();
                   setTimeout(() => {
                     const selection = win.getSelection();
                     const selectedText = selection ? selection.toString().trim() : '';
 
-                    // Check if clicking on a highlight
-                    const target = e.target as HTMLElement;
-                    const highlightSpan = target.closest('span[data-highlight-id]');
-                    const highlightId = highlightSpan?.getAttribute('data-highlight-id');
-
-                    if (highlightId) {
-                      // Clicked on a highlight - show "取消选中" option
-                      const rect = (highlightSpan as HTMLElement).getBoundingClientRect();
+                    if (selectedText && selection && selection.rangeCount > 0) {
+                      // Get iframe position relative to parent document
                       const iframeRect = iframe.getBoundingClientRect();
-                      setToolbarPosition({
-                        x: iframeRect.left + rect.left + rect.width / 2,
-                        y: iframeRect.top + rect.top - 10
+                      // Show context menu at mouse position (add iframe offset for parent document)
+                      setContextMenuPosition({
+                        x: iframeRect.left + e.clientX,
+                        y: iframeRect.top + e.clientY
                       });
-                      setCurrentHighlightId(highlightId);
-                      setCurrentSelection('');
-                      setShowToolbar(true);
-                    } else if (selectedText) {
-                      // Normal text selection
-                      if (selection && selection.rangeCount > 0) {
-                        const range = selection.getRangeAt(0);
-                        const rect = range.getBoundingClientRect();
-                        const iframeRect = iframe.getBoundingClientRect();
-                        setToolbarPosition({
-                          x: iframeRect.left + rect.left + rect.width / 2,
-                          y: iframeRect.top + rect.top - 10
-                        });
-                        setCurrentSelection(selectedText);
-                        setCurrentHighlightId(null);
-                        setShowToolbar(true);
-                      }
+                      setContextMenuSelection(selectedText);
+                      setShowContextMenu(true);
                     }
                   }, 10);
                 });
 
                 // Also listen to epubjs selected event to get CFI
                 renditionInstance.on('selected', (cfiRange: string) => {
-                  setCurrentCfiRange(cfiRange);
+                  setContextMenuCfiRange(cfiRange);
                 });
               } else {
                 setTimeout(() => tryBind(attempts - 1), 500);
@@ -435,8 +441,10 @@ export default function ReaderPage() {
     if (currentSpineIndex > 0 && rendition) {
       const newIndex = currentSpineIndex - 1;
       setCurrentSpineIndex(newIndex);
+      const newHref = spineItems[newIndex];
+      setCurrentChapter(newHref);
       try {
-        await rendition.display(spineItems[newIndex]);
+        await rendition.display(newHref);
       } catch (err) {
         console.error('Error displaying prev:', err);
       }
@@ -448,231 +456,338 @@ export default function ReaderPage() {
     if (currentSpineIndex < spineItems.length - 1 && rendition) {
       const newIndex = currentSpineIndex + 1;
       setCurrentSpineIndex(newIndex);
+      const newHref = spineItems[newIndex];
+      setCurrentChapter(newHref);
       try {
-        await rendition.display(spineItems[newIndex]);
+        await rendition.display(newHref);
       } catch (err) {
         console.error('Error displaying next:', err);
       }
     }
   }, [currentSpineIndex, spineItems, rendition]);
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!input.trim() || aiLoading) return;
+
+    // 检查是否是第一次发送消息
+    const isFirstMessage = messages.length === 0;
+
+    // 构建用户消息内容，只有第一次发送时才包含选中文本
+    let userContent = input;
+    if (isFirstMessage && selectedBlocks && selectedBlocks.length > 0) {
+      const selectedText = selectedBlocks.map(b => b.content).join('\n\n');
+      userContent = `选中文本：\n${selectedText}\n\n${input}`;
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
       blocks: [{
         id: Date.now().toString(),
-        content: input,
+        content: userContent,
         timestamp: Date.now(),
       }],
       timestamp: Date.now(),
     };
 
-    // 将当前消息添加到消息列表（包括选中的 blocks）
-    const allMessages = [...messages, userMessage];
-
-    // 转换为 langchain 消息格式
-    const langChainMessages = toLangChainMessages(allMessages);
-    console.log('LangChain messages:', langChainMessages);
-
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setAiLoading(true);
 
-    setTimeout(() => {
+    try {
+      // 准备历史消息
+      const history = messages.map(msg => ({
+        role: msg.role,
+        content: msg.blocks.map(b => b.content).join('\n\n'),
+      }));
+
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: userContent,
+          history,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to get response');
+      }
+
+      const data = await response.json();
+
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         blocks: [{
           id: (Date.now() + 1).toString(),
-          content: '这是一个 AI 对话功能的占位符。您可以集成自己的 AI API 来实现实际的对话功能。',
+          content: data.content,
           timestamp: Date.now(),
         }],
         timestamp: Date.now(),
       };
-      setMessages(prev => [...prev, assistantMessage]);
+      const newMessages = [...messages, userMessage, assistantMessage];
+      setMessages(newMessages);
+
+      // Create new session if doesn't exist
+      let sessionId = currentSessionId;
+      if (!sessionId) {
+        sessionId = Date.now().toString();
+        setCurrentSessionId(sessionId);
+        const newSession = {
+          id: sessionId,
+          selectedBlocks,
+          messages: newMessages,
+          timestamp: Date.now(),
+        };
+        setSessions(prev => [...prev, newSession]);
+      }
+
+      // Save current session
+      saveCurrentSession();
+    } catch (err) {
+      console.error('Error calling LLM:', err);
+      const errorData = err instanceof Error ? err.message : String(err);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        blocks: [{
+          id: (Date.now() + 1).toString(),
+          content: `抱歉，调用 AI 服务失败：${errorData}`,
+          timestamp: Date.now(),
+        }],
+        timestamp: Date.now(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
       setAiLoading(false);
-    }, 1000);
+    }
   };
 
   // Handle copy to clipboard
   const handleCopyToClipboard = async () => {
-    if (currentSelection) {
+    if (contextMenuSelection) {
       try {
-        await navigator.clipboard.writeText(currentSelection);
-        setShowToolbar(false);
+        await navigator.clipboard.writeText(contextMenuSelection);
+        setShowContextMenu(false);
       } catch (err) {
         console.error('Failed to copy:', err);
       }
     }
   };
 
-  // Apply highlights to the DOM based on selectedBlocks
-  const applyHighlights = useCallback(() => {
-    if (!rendition || selectedBlocks.length === 0) return;
 
-    const container = viewerRef.current;
-    const iframe = container?.querySelector('iframe');
-    if (!iframe || !iframe.contentWindow) return;
+  // Load notes from local JSON file for the current chapter
+  const loadNotesForChapter = useCallback(async (chapterHref: string) => {
+    if (!chapterHref || !bookId) return;
 
-    const win = iframe.contentWindow;
+    try {
+      // Extract HTML filename from chapter href
+      const htmlFile = chapterHref.split('#')[0];
+      // Encode the htmlFile for URL
+      const encodedHtmlFile = encodeURIComponent(htmlFile);
 
-    // Skip if already highlighted
-    if (win.document.querySelector('span[data-highlight-id]')) return;
+      const res = await fetch(`/api/note/${bookId}/${encodedHtmlFile}`);
+      if (res.ok) {
+        const data = await res.json();
 
-    // Use TreeWalker to find text nodes and highlight them
-    const walker = win.document.createTreeWalker(
-      win.document.body,
-      1, // NodeFilter.SHOW_TEXT
-      null
-    );
-
-    const blocksToHighlight = [...selectedBlocks];
-    let node: Node | null;
-
-    while ((node = walker.nextNode()) && blocksToHighlight.length > 0) {
-      const text = node.textContent || '';
-      const parent = node.parentNode as HTMLElement;
-
-      // Skip if already in a highlight span
-      if (parent?.dataset?.highlightId) continue;
-
-      for (let i = 0; i < blocksToHighlight.length; i++) {
-        const block = blocksToHighlight[i];
-        const searchText = block.content;
-        const index = text.indexOf(searchText);
-
-        if (index !== -1) {
-          try {
-            const range = win.document.createRange();
-            range.setStart(node, index);
-            range.setEnd(node, index + searchText.length);
-
-            const span = win.document.createElement('span');
-            span.style.backgroundColor = '#fef08a';
-            span.style.borderRadius = '2px';
-            span.dataset.highlightId = block.id;
-
-            span.appendChild(range.extractContents());
-            range.insertNode(span);
-
-            // Remove from list after successful highlight
-            blocksToHighlight.splice(i, 1);
-            break;
-          } catch (e) {
-            // Continue if highlighting fails
-          }
+        // Load sessions
+        if (data.sessions && data.sessions.length > 0) {
+          const loadedSessions = data.sessions.map((session: any) => ({
+            id: session.id,
+            selectedBlocks: session.selectedBlocks || [],
+            messages: session.messages || [],
+            timestamp: session.timestamp,
+          }));
+          setSessions(loadedSessions);
+          // Select the most recent session
+          const mostRecent = loadedSessions.sort((a: any, b: any) => b.timestamp - a.timestamp)[0];
+          setCurrentSessionId(mostRecent.id);
+          setMessages(mostRecent.messages || []);
+          setSelectedBlocks(mostRecent.selectedBlocks || []);
+        } else {
+          setSessions([]);
+          setCurrentSessionId(null);
+          setMessages([]);
+          setSelectedBlocks([]);
         }
       }
+    } catch (err) {
+      console.error('Failed to load notes:', err);
+      setSelectedBlocks([]);
+      setSessions([]);
     }
-  }, [rendition, selectedBlocks]);
+  }, [bookId]);
 
-  // Keep the ref updated
-  applyHighlightsRef.current = applyHighlights;
+  // Save current session
+  const saveCurrentSession = useCallback(async () => {
+    if (!currentSessionId || !bookId || !currentChapter) return;
 
-  // Apply highlights when chapter changes
-  useEffect(() => {
-    if (currentChapter && selectedBlocks.length > 0 && rendition) {
-      // Wait for rendition to finish rendering
-      const timer = setTimeout(() => {
-        applyHighlights();
-      }, 500);
-      return () => clearTimeout(timer);
+    try {
+      const htmlFile = currentChapter.split('#')[0];
+      const encodedHtmlFile = encodeURIComponent(htmlFile);
+
+      await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionId: currentSessionId,
+          selectedBlocks,
+          messages,
+        }),
+      });
+    } catch (err) {
+      console.error('Failed to save session:', err);
     }
-  }, [currentChapter, selectedBlocks.length, rendition, applyHighlights]);
+  }, [bookId, currentChapter, currentSessionId, selectedBlocks, messages]);
 
-  // Re-apply highlights when window is resized
+  // Create a new session
+  const createNewSession = useCallback(() => {
+    const newSessionId = Date.now().toString();
+    setCurrentSessionId(newSessionId);
+    setMessages([]);
+    // Don't clear selectedBlocks - user might want to use same selection
+    const newSession = {
+      id: newSessionId,
+      selectedBlocks,
+      messages: [],
+      timestamp: Date.now(),
+    };
+    setSessions(prev => [...prev, newSession]);
+  }, [selectedBlocks]);
+
+  // Switch to an existing session
+  const switchToSession = useCallback((sessionId: string) => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (session) {
+      setCurrentSessionId(sessionId);
+      setMessages(session.messages || []);
+      setSelectedBlocks(session.selectedBlocks || []);
+    }
+  }, [sessions]);
+
+  // Delete a session
+  const deleteSession = useCallback((sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    const newSessions = sessions.filter(s => s.id !== sessionId);
+    setSessions(newSessions);
+
+    // If deleting current session, switch to another or clear
+    if (currentSessionId === sessionId) {
+      if (newSessions.length > 0) {
+        switchToSession(newSessions[newSessions.length - 1].id);
+      } else {
+        setCurrentSessionId(null);
+        setMessages([]);
+      }
+    }
+  }, [sessions, currentSessionId, switchToSession]);
+
+  // Load notes when currentChapter changes
   useEffect(() => {
-    let resizeTimer: NodeJS.Timeout;
-
-    const handleWindowResize = () => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        if (selectedBlocks.length > 0 && rendition) {
-          applyHighlightsRef.current();
-        }
-      }, 300);
-    };
-
-    window.addEventListener('resize', handleWindowResize);
-    return () => {
-      window.removeEventListener('resize', handleWindowResize);
-      clearTimeout(resizeTimer);
-    };
-  }, [selectedBlocks.length, rendition]);
+    if (currentChapter && isContentReady) {
+      loadNotesForChapter(currentChapter);
+    }
+  }, [currentChapter, isContentReady, loadNotesForChapter]);
 
   // Handle add to AI assistant
-  const handleAddToAssistant = () => {
-    if (currentSelection && rendition) {
+  const handleAddToAssistant = async () => {
+    if (contextMenuSelection && rendition) {
       const blockId = Date.now().toString();
-
-      // Get the iframe and highlight the selection using DOM
-      const container = viewerRef.current;
-      const iframe = container?.querySelector('iframe');
-      if (iframe && iframe.contentWindow) {
-        const win = iframe.contentWindow;
-        const selection = win.getSelection();
-        if (selection && selection.rangeCount > 0) {
-          try {
-            const range = selection.getRangeAt(0);
-            const span = win.document.createElement('span');
-            span.style.backgroundColor = '#fef08a';
-            span.style.borderRadius = '2px';
-            span.dataset.highlightId = blockId;
-            // Use a safer method to highlight - extract content and wrap it
-            span.appendChild(range.extractContents());
-            range.insertNode(span);
-          } catch (err) {
-            console.error('Failed to highlight:', err);
-          }
-        }
-      }
 
       const newBlock: Block = {
         id: blockId,
-        content: currentSelection,
+        content: contextMenuSelection,
         timestamp: Date.now(),
-        cfiRange: currentCfiRange,
+        cfiRange: contextMenuCfiRange,
       };
 
-      setSelectedBlocks(prev => [...prev, newBlock]);
-      setShowToolbar(false);
+      const newSelectedBlocks = [...selectedBlocks, newBlock];
+      setSelectedBlocks(newSelectedBlocks);
+      setShowContextMenu(false);
+
+      // Create session if doesn't exist
+      let sessionId = currentSessionId;
+      if (!sessionId) {
+        sessionId = Date.now().toString();
+        setCurrentSessionId(sessionId);
+        const newSession = {
+          id: sessionId,
+          selectedBlocks: newSelectedBlocks,
+          messages: [],
+          timestamp: Date.now(),
+        };
+        setSessions(prev => [...prev, newSession]);
+      }
+
+      // Save to local JSON file via API
+      try {
+        const htmlFile = currentChapter.split('#')[0];
+        const encodedHtmlFile = encodeURIComponent(htmlFile);
+
+        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sessionId: currentSessionId || sessionId,
+            selectedBlocks: newSelectedBlocks,
+            messages,
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to save note:', err);
+      }
     }
   };
 
   // Handle remove block
-  const handleRemoveBlock = (id: string) => {
-    // Remove highlight from DOM
-    const container = viewerRef.current;
-    const iframe = container?.querySelector('iframe');
-    if (iframe && iframe.contentWindow) {
-      const win = iframe.contentWindow;
-      const highlightEl = win.document.querySelector(`span[data-highlight-id="${id}"]`);
-      if (highlightEl) {
-        const parent = highlightEl.parentNode;
-        if (parent) {
-          // Replace the span with its text content
-          while (highlightEl.firstChild) {
-            parent.insertBefore(highlightEl.firstChild, highlightEl);
-          }
-          parent.removeChild(highlightEl);
-        }
-      }
-    }
-
-    setSelectedBlocks(prev => prev.filter(b => b.id !== id));
+  const handleRemoveBlock = async (id: string) => {
+    // Remove from local state
+    const newSelectedBlocks = selectedBlocks.filter(b => b.id !== id);
+    setSelectedBlocks(newSelectedBlocks);
     setExpandedBlocks(prev => {
       const next = new Set(prev);
       next.delete(id);
       return next;
     });
 
-    // Hide toolbar after removing block
-    setShowToolbar(false);
-    setCurrentHighlightId(null);
-    setCurrentSelection('');
+    // Update current session's selectedBlocks
+    if (currentSessionId) {
+      setSessions(prev => prev.map(s =>
+        s.id === currentSessionId
+          ? { ...s, selectedBlocks: newSelectedBlocks, timestamp: Date.now() }
+          : s
+      ));
+      // Save to JSON file
+      try {
+        const htmlFile = currentChapter.split('#')[0];
+        const encodedHtmlFile = encodeURIComponent(htmlFile);
+        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sessionId: currentSessionId,
+            selectedBlocks: newSelectedBlocks,
+            messages,
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to save after removing block:', err);
+      }
+    }
+
+    // Hide context menu after removing block
+    setShowContextMenu(false);
+    setContextMenuSelection('');
   };
 
   // Handle toggle block expand/collapse
@@ -688,17 +803,16 @@ export default function ReaderPage() {
     });
   };
 
-  // Hide toolbar when clicking outside
+  // Hide context menu when clicking outside
   const handleClickOutside = useCallback(() => {
-    setShowToolbar(false);
-    setCurrentHighlightId(null);
-    setCurrentSelection('');
+    setShowContextMenu(false);
+    setContextMenuSelection('');
   }, []);
 
   useEffect(() => {
-    if (showToolbar) {
-      const handleDocumentClick = (e: MouseEvent) => {
-        // Don't hide if clicking on the toolbar itself
+    if (showContextMenu) {
+      const handleDocumentMouseDown = (e: MouseEvent) => {
+        // Don't hide if clicking on the context menu itself
         const target = e.target as HTMLElement;
         if (target.closest('.fixed.z-50')) {
           return;
@@ -706,12 +820,12 @@ export default function ReaderPage() {
         handleClickOutside();
       };
 
-      document.addEventListener('click', handleDocumentClick);
+      document.addEventListener('mousedown', handleDocumentMouseDown);
       return () => {
-        document.removeEventListener('click', handleDocumentClick);
+        document.removeEventListener('mousedown', handleDocumentMouseDown);
       };
     }
-  }, [showToolbar, handleClickOutside]);
+  }, [showContextMenu, handleClickOutside]);
 
   if (loading) {
     return (
@@ -849,54 +963,33 @@ export default function ReaderPage() {
 
         {/* Main reader area */}
         <main className="flex-1 bg-white overflow-y-auto relative">
-          {/* Floating toolbar for text selection or highlight */}
-          {showToolbar && (
+          {/* Context menu for right-click */}
+          {showContextMenu && (
             <div
-              className="fixed z-50 flex items-center gap-1 bg-white rounded-lg shadow-lg border border-slate-200 p-1"
+              className="fixed z-50 bg-white rounded-lg shadow-lg border border-slate-200 py-1 min-w-[140px]"
               style={{
-                left: toolbarPosition.x,
-                top: toolbarPosition.y,
-                transform: 'translate(-50%, -100%)',
+                left: contextMenuPosition.x,
+                top: contextMenuPosition.y,
               }}
             >
-              {currentHighlightId ? (
-                // Show "取消选中" when clicking on a highlight
-                <button
-                  onClick={() => handleRemoveBlock(currentHighlightId!)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                  title="取消选中"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                  <span>取消选中</span>
-                </button>
-              ) : (
-                // Show "复制" and "选中" for normal text selection
-                <>
-                  <button
-                    onClick={handleCopyToClipboard}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
-                    title="复制到剪贴板"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
-                    <span>复制</span>
-                  </button>
-                  <div className="w-px h-5 bg-slate-200"></div>
-                  <button
-                    onClick={handleAddToAssistant}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
-                    title="发送到AI助手"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                    </svg>
-                    <span>选中</span>
-                  </button>
-                </>
-              )}
+              <button
+                onClick={handleCopyToClipboard}
+                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <span>复制</span>
+              </button>
+              <button
+                onClick={handleAddToAssistant}
+                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-indigo-600 hover:bg-indigo-50 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                <span>选中</span>
+              </button>
             </div>
           )}
 
@@ -966,18 +1059,63 @@ export default function ReaderPage() {
           style={{ width: chatWidth }}
         >
           <div className="p-4 border-b border-slate-100">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
-                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="font-semibold text-slate-800">AI 助手</h2>
+                  <p className="text-xs text-slate-500">智能问答</p>
+                </div>
+              </div>
+              <button
+                onClick={createNewSession}
+                className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
+                title="新建对话"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
-              </div>
-              <div>
-                <h2 className="font-semibold text-slate-800">AI 助手</h2>
-                <p className="text-xs text-slate-500">智能问答</p>
-              </div>
+              </button>
             </div>
           </div>
+
+          {/* Session tabs */}
+          {sessions.length > 0 && (
+            <div className="border-b border-slate-100 overflow-x-auto">
+              <div className="flex gap-1 px-2 py-2 min-w-max">
+                {sessions.map((session, index) => (
+                  <div
+                    key={session.id}
+                    className={`flex items-center gap-1 pr-1 rounded-lg text-xs whitespace-nowrap transition-colors ${
+                      currentSessionId === session.id
+                        ? 'bg-indigo-100 text-indigo-700'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    <button
+                      onClick={() => switchToSession(session.id)}
+                      className="px-2 py-1.5 hover:opacity-70 transition-opacity"
+                    >
+                      对话 {index + 1}
+                    </button>
+                    <button
+                      onClick={(e) => deleteSession(session.id, e)}
+                      className="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                      title="删除对话"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Selected text blocks - always show title, content is collapsible */}
           {selectedBlocks.length > 0 && (
@@ -1054,7 +1192,7 @@ export default function ReaderPage() {
                 <p className="text-sm text-slate-500">向 AI 提问关于内容的问题</p>
               </div>
             ) : (
-              messages.map((msg) => (
+              messages.map((msg, index) => (
                 <div
                   key={msg.id}
                   className={`${msg.role === 'user' ? 'ml-8' : 'mr-8'}`}
@@ -1066,7 +1204,44 @@ export default function ReaderPage() {
                         : 'bg-slate-100 text-slate-800 rounded-bl-md'
                     }`}
                   >
-                    {msg.blocks.map(b => b.content).join('\n\n')}
+                    {msg.role === 'assistant' ? (
+                      <ReactMarkdown
+                        components={{
+                          p: ({ children }) => <p className="mb-2">{children}</p>,
+                          ul: ({ children }) => <ul className="list-disc ml-4 mb-2">{children}</ul>,
+                          ol: ({ children }) => <ol className="list-decimal ml-4 mb-2">{children}</ol>,
+                          li: ({ children }) => <li className="mb-1">{children}</li>,
+                          code: ({ className, children }) => {
+                            const isInline = !className;
+                            return isInline ? (
+                              <code className="bg-slate-200 px-1 py-0.5 rounded text-xs">{children}</code>
+                            ) : (
+                              <code className={`${className} block bg-slate-800 text-slate-100 p-2 rounded-lg overflow-x-auto mb-2 text-xs`}>
+                                {children}
+                              </code>
+                            );
+                          },
+                          pre: ({ children }) => <pre className="mb-2">{children}</pre>,
+                          h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
+                          h2: ({ children }) => <h2 className="text-base font-bold mb-1">{children}</h2>,
+                          h3: ({ children }) => <h3 className="text-sm font-bold mb-1">{children}</h3>,
+                          blockquote: ({ children }) => <blockquote className="border-l-2 border-slate-300 pl-2 italic mb-2">{children}</blockquote>,
+                        }}
+                      >
+                        {msg.blocks.map(b => b.content).join('\n\n')}
+                      </ReactMarkdown>
+                    ) : (
+                      // 如果是第一条用户消息，隐藏"选中文本："部分
+                      (() => {
+                        const isFirstUserMessage = index === 0 && msg.role === 'user';
+                        const content = msg.blocks.map(b => b.content).join('\n\n');
+                        if (isFirstUserMessage) {
+                          // 移除"选中文本："开头的部分
+                          return content.replace(/^选中文本：[\s\S]*?\n\n/, '');
+                        }
+                        return content;
+                      })()
+                    )}
                   </div>
                 </div>
               ))

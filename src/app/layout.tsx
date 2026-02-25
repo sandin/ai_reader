@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Reader - EPUB 阅读器",
-  description: "EPUB 阅读器 with AI 对话功能",
+  title: "AI Reader",
+  description: "Reading with AI",
 };
 
 export default function RootLayout({
