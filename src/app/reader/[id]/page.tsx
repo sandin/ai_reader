@@ -94,6 +94,7 @@ export default function ReaderPage() {
   const selectionHandlerAdded = useRef(false);
   const saveProgressTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const prevSelectedBlocksRef = useRef<string>('');
+  const savedCfiRef = useRef<string | null>(null);
 
   // ==================== Initialization ====================
 
@@ -161,10 +162,10 @@ export default function ReaderPage() {
         setChapters(chapterList);
 
         // Build chapter index
-        await buildChapterIndex(bookInstance, toc);
+        const tree = await buildChapterIndex(bookInstance, toc);
 
         // Load saved progress
-        await loadSavedProgress(chapterList);
+        await loadSavedProgress(chapterList, tree);
 
         setIsContentReady(true);
       } catch (err) {
@@ -189,6 +190,7 @@ export default function ReaderPage() {
       let loadedIndex: ChapterIndex = { tree: [], htmlOrder: [] };
       if (indexRes.ok) loadedIndex = await indexRes.json();
 
+      let tree: any[] = [];
       if (!loadedIndex.tree || loadedIndex.tree.length === 0) {
         const spine = bookInstance.spine as any;
         const spineItems = spine ? Array.from(spine.items || spine) : [];
@@ -224,7 +226,7 @@ export default function ReaderPage() {
           });
         };
 
-        const tree = buildTree(toc);
+        tree = buildTree(toc);
 
         await fetch('/api/index', {
           method: 'POST',
@@ -234,45 +236,71 @@ export default function ReaderPage() {
 
         setChapterIndex({ tree, htmlOrder });
       } else {
+        tree = loadedIndex.tree;
         setChapterIndex(loadedIndex);
       }
+      return tree;
     } catch (err) {
       console.error('Failed to build chapter index:', err);
+      return [];
     }
   };
 
   // Load saved reading progress
-  const loadSavedProgress = async (chapterList: Chapter[]) => {
+  const loadSavedProgress = async (chapterList: Chapter[], tree: any[] = []) => {
     try {
+      console.log('[Reader] Loading progress for bookId:', bookId);
       const progressRes = await fetch(`/api/progress?bookId=${bookId}`);
       if (progressRes.ok) {
         const progressData = await progressRes.json();
+        console.log('[Reader] Progress data:', progressData);
+
+        // Always try to set CFI if available, regardless of chapter existence
+        if (progressData.cfi) {
+          console.log('[Reader] Setting savedCfi:', progressData.cfi);
+          savedCfiRef.current = progressData.cfi;
+          setSavedCfi(progressData.cfi);
+        }
+
         if (progressData.htmlFile) {
           const savedChapterExists = chapterList.some(
             (c: Chapter) => c.href.includes(progressData.htmlFile) || progressData.htmlFile.includes(c.href.split('#')[0].split('/').pop() || '')
           );
+          console.log('[Reader] Saved chapter exists:', savedChapterExists, 'htmlFile:', progressData.htmlFile);
+          console.log('[Reader] Chapter list sample:', chapterList.slice(0, 3).map(c => c.href));
           if (savedChapterExists) {
             const htmlFileName = progressData.htmlFile.split('/').pop() || progressData.htmlFile;
             const findInTree = (nodes: any[]): any => {
               for (const node of nodes) {
                 if (node.contents.some((c: string) => c.includes(htmlFileName) || htmlFileName.includes(c))) return node;
-                if (node.children.length > 0) {
+                if (node.children && node.children.length > 0) {
                   const found = findInTree(node.children);
                   if (found) return found;
                 }
               }
               return null;
             };
-            const indexInfo = findInTree(chapterIndex.tree);
+            const searchTree = tree.length > 0 ? tree : chapterIndex.tree;
+            const indexInfo = findInTree(searchTree);
+            console.log('[Reader] Index info:', indexInfo);
             if (indexInfo) {
               setCurrentChapter(indexInfo.contents[0] || '');
+              console.log('[Reader] Set currentChapter to:', indexInfo.contents[0]);
             } else {
               const matched = chapterList.find((c: Chapter) => c.href.split('#')[0].split('/').pop() === htmlFileName);
-              if (matched) setCurrentChapter(matched.href);
+              if (matched) {
+                setCurrentChapter(matched.href);
+                console.log('[Reader] Set currentChapter to (fallback):', matched.href);
+              }
             }
+          } else if (chapterList.length > 0) {
+            // Chapter not found in TOC, but we have CFI - try to use first chapter anyway
+            // The CFI will be used to restore position within that chapter
+            console.log('[Reader] Chapter not in TOC, will try to use first chapter with CFI');
+            setCurrentChapter(chapterList[0].href);
+            console.log('[Reader] Set currentChapter to first chapter:', chapterList[0].href);
           }
         }
-        if (progressData.cfi) setSavedCfi(progressData.cfi);
       }
     } catch (err) {
       console.error('Failed to load reading progress:', err);
@@ -357,14 +385,23 @@ export default function ReaderPage() {
 
     // Display initial chapter
     if (initialChapter) {
-      if (savedCfi) {
-        await renditionInstance.display(savedCfi);
-        setSavedCfi(null);
+      const cfiToRestore = savedCfiRef.current;
+      if (cfiToRestore) {
+        console.log('[Reader] Attempting to restore CFI:', cfiToRestore);
+        try {
+          await renditionInstance.display(cfiToRestore);
+          console.log('[Reader] Successfully restored CFI');
+          savedCfiRef.current = null;
+          setSavedCfi(null);
+        } catch (cfiError) {
+          console.warn('[Reader] Failed to restore CFI, falling back to chapter:', cfiError);
+          await renditionInstance.display(initialChapter);
+        }
       } else {
         await renditionInstance.display(initialChapter);
       }
     }
-  }, [fontSize, fontFamily, lineHeight, savedCfi, bookId]);
+  }, [fontSize, fontFamily, lineHeight, bookId]);
 
   // Auto-display saved chapter when book is loaded
   useEffect(() => {
@@ -378,6 +415,29 @@ export default function ReaderPage() {
       return () => clearTimeout(timer);
     }
   }, [isContentReady, book, currentChapter, rendition, createRenditionInstance, setupRendition]);
+
+  // Update font settings when changed
+  useEffect(() => {
+    if (rendition) {
+      rendition.themes.fontSize(`${fontSize}px`);
+      rendition.themes.font(fontFamily);
+      rendition.themes.override("color", '#3a3a3a', true);
+      rendition.themes.override("line-height", lineHeight.toString(), true);
+    }
+  }, [fontSize, fontFamily, lineHeight, rendition]);
+
+  // Restore saved position when savedCfi is available and rendition is ready
+  useEffect(() => {
+    if (rendition && savedCfi) {
+      console.log('[Reader] useEffect: Attempting to restore CFI:', savedCfi);
+      rendition.display(savedCfi).then(() => {
+        console.log('[Reader] useEffect: Successfully restored CFI');
+        setSavedCfi(null);
+      }).catch((err) => {
+        console.warn('[Reader] useEffect: Failed to restore CFI:', err);
+      });
+    }
+  }, [rendition, savedCfi]);
 
   // ==================== Save Progress ====================
 

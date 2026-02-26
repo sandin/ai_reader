@@ -408,12 +408,13 @@ function MessageContent({ content, isStreaming }: { content: string; isStreaming
   );
 }
 
-// User message content component - hides selected text prefix for first message
+// User message content component - shows only content after "用户提问：" for first message
 function UserMessageContent({ content, index }: { content: string; index: number }) {
   const isFirstUserMessage = index === 0;
   if (isFirstUserMessage) {
-    // Remove "选中文本：" prefix
-    return content.replace(/^选中文本：[\s\S]*?\n\n/, '');
+    // Extract content after "用户提问："
+    const match = content.match(/用户提问：([\s\S]*)/);
+    return match ? match[1] : content;
   }
   return content;
 }
