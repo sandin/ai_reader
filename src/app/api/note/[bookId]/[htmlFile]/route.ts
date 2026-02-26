@@ -24,8 +24,18 @@ interface Session {
   timestamp: number;
 }
 
+interface Comment {
+  id: string;
+  content: string;
+  selectedText: string;
+  cfiRange: string;
+  chapter: string;
+  timestamp: number;
+}
+
 interface NoteData {
   sessions: Session[];
+  comments?: Comment[];
 }
 
 // Helper to decode bookId
@@ -102,11 +112,13 @@ export async function GET(
       }
       return NextResponse.json({
         sessions: data.sessions || [],
+        comments: data.comments || [],
         filePath: jsonFilePath,
       });
     } catch (e) {
       return NextResponse.json({
         sessions: [],
+        comments: [],
         filePath: jsonFilePath,
       });
     }
@@ -187,7 +199,7 @@ export async function POST(
   try {
     const { bookId, htmlFile } = await params;
     const body = await request.json();
-    const { sessionId, title, selectedBlocks, messages } = body;
+    const { sessionId, title, selectedBlocks, messages, comments } = body;
 
     if (!bookId || !htmlFile) {
       return NextResponse.json(
@@ -209,19 +221,24 @@ export async function POST(
     const jsonFilePath = path.join(bookNotesDir, jsonFileName);
 
     // Read existing data
-    let data: NoteData = { sessions: [] };
+    let data: NoteData = { sessions: [], comments: [] };
     if (fs.existsSync(jsonFilePath)) {
       try {
         const content = fs.readFileSync(jsonFilePath, 'utf-8');
         const parsed = JSON.parse(content);
         if (Array.isArray(parsed)) {
-          data = { sessions: [] };
+          data = { sessions: [], comments: [] };
         } else {
           data = parsed;
         }
       } catch {
-        data = { sessions: [] };
+        data = { sessions: [], comments: [] };
       }
+    }
+
+    // Initialize comments array if not present
+    if (!data.comments) {
+      data.comments = [];
     }
 
     // Update or create session
@@ -245,6 +262,11 @@ export async function POST(
           timestamp: Date.now(),
         });
       }
+    }
+
+    // Update comments if provided
+    if (comments && Array.isArray(comments)) {
+      data.comments = comments;
     }
 
     fs.writeFileSync(jsonFilePath, JSON.stringify(data, null, 2), 'utf-8');
