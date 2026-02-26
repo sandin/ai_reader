@@ -419,9 +419,9 @@ function MessageContent({
           );
         },
         pre: ({ children }) => <pre className="mb-2">{children}</pre>,
-        h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
-        h2: ({ children }) => <h2 className="text-base font-bold mb-1">{children}</h2>,
-        h3: ({ children }) => <h3 className="text-sm font-bold mb-1">{children}</h3>,
+        h1: ({ children }) => <h1 className="font-bold mt-2 mb-2">{children}</h1>,
+        h2: ({ children }) => <h2 className="font-bold mt-2 mb-2">{children}</h2>,
+        h3: ({ children }) => <h3 className="font-bold mt-2 mb-2">{children}</h3>,
         blockquote: ({ children }) => <blockquote className="border-l-2 border-slate-300 pl-2 italic mb-2">{children}</blockquote>,
       }}
     >
