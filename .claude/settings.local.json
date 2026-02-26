@@ -9,7 +9,8 @@
       "Bash(npm install react-markdown)",
       "Bash(npm run dev)",
       "Bash(npm run build)",
-      "Bash(npm run lint)"
+      "Bash(npm run lint)",
+      "Bash(git checkout -- src/app/reader/[id]/page.tsx)"
     ]
   }
 }

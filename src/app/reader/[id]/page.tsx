@@ -1839,7 +1839,7 @@ export default function ReaderPage() {
         )}
 
         {/* Main reader area */}
-        <main className="flex-1 bg-white overflow-y-auto relative">
+        <main className="flex-1 flex flex-col bg-white overflow-hidden relative">
           {/* Context menu for right-click */}
           {showContextMenu && (
             <div
@@ -1936,11 +1936,11 @@ export default function ReaderPage() {
           {selectedChapter ? (
             <div
               ref={viewerRef}
-              className="h-full min-h-[calc(100vh-120px)]"
+              className="flex-1 overflow-y-auto"
               style={{ background: '#fff', color: '#4a4a4a' }}
             />
           ) : (
-            <div className="h-full min-h-[calc(100vh-120px)] flex items-center justify-center bg-slate-50">
+            <div className="flex-1 flex items-center justify-center bg-slate-50">
               <div className="text-center">
                 <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
                   <svg className="w-8 h-8 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1994,39 +1994,6 @@ export default function ReaderPage() {
               评论 ({comments.length})
             </button>
           </div>
-
-          {/* AI Chat Tab Content */}
-          {activeTab === 'chat' && (
-            <div className="p-3 border-b border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-                <h2 className="font-semibold text-slate-800">AI 助手</h2>
-              </div>
-              <button
-                onClick={createNewSession}
-                className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition-colors"
-                title="新建对话"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-              </button>
-            </div>
-          )}
-
-          {/* Comment Tab Content */}
-          {activeTab === 'comment' && (
-            <div className="p-3 border-b border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                </svg>
-                <h2 className="font-semibold text-slate-800">评论</h2>
-              </div>
-            </div>
-          )}
 
           {/* Chat content - only show when on chat tab */}
           {activeTab === 'chat' && (
@@ -2232,6 +2199,15 @@ export default function ReaderPage() {
           {/* Input area */}
           <div className="p-4 border-t border-slate-100 bg-slate-50">
             <div className="flex gap-2 items-end relative">
+              <button
+                onClick={createNewSession}
+                className="p-2.5 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition-colors shrink-0"
+                title="新建对话"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
               <textarea
                 ref={(el) => {
                   if (el) {
