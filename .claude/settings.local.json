@@ -6,7 +6,9 @@
       "Bash(npm install langchain langchain-openai)",
       "Bash(npm install langchain @langchain/openai)",
       "Bash(npm install @langchain/langsmith)",
-      "Bash(npm install react-markdown)"
+      "Bash(npm install react-markdown)",
+      "Bash(npm run dev)",
+      "Bash(npm run build)"
     ]
   }
 }

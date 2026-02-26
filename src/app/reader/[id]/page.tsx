@@ -38,6 +38,23 @@ export default function ReaderPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
   const [fontSize, setFontSize] = useState(18);
+  const [fontFamily, setFontFamily] = useState('Georgia, serif');
+  const [lineHeight, setLineHeight] = useState(1.8);
+
+  // 可选字体列表 - 跨平台系统字体 + webfont
+  const fontOptions = [
+    // 系统字体
+    { value: 'Georgia, "Times New Roman", serif', label: '衬线体' },
+    { value: 'Arial, Helvetica, sans-serif', label: '无衬线' },
+    { value: '"PingFang SC", "Hiragino Sans GB", "Heiti SC", sans-serif', label: '苹方 PingFang' },
+    { value: '"Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif', label: '微软雅黑' },
+    { value: '"SimSun", "STSong", serif', label: '宋体' },
+    { value: 'Menlo, Monaco, "Courier New", monospace', label: '等宽字体' },
+    { value: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif', label: '系统默认' },
+    // Webfont
+    { value: '"Noto Sans SC", "Microsoft YaHei", sans-serif', label: '思源黑体' },
+    { value: '"Noto Serif SC", "SimSun", serif', label: '思源宋体' },
+  ];
   const [showToc, setShowToc] = useState(true);
   const [selectedChapter, setSelectedChapter] = useState<string | null>(null);
   const [isContentReady, setIsContentReady] = useState(false);
@@ -175,11 +192,19 @@ export default function ReaderPage() {
     };
   }, [currentChapter, rendition, isResizingLeft, isResizingRight]);
 
-  // Load font size from localStorage
+  // Load font settings from localStorage
   useEffect(() => {
-    const saved = localStorage.getItem('reader-font-size');
-    if (saved) {
-      setFontSize(parseInt(saved, 10));
+    const savedFontSize = localStorage.getItem('reader-font-size');
+    if (savedFontSize) {
+      setFontSize(parseInt(savedFontSize, 10));
+    }
+    const savedFontFamily = localStorage.getItem('reader-font-family');
+    if (savedFontFamily) {
+      setFontFamily(savedFontFamily);
+    }
+    const savedLineHeight = localStorage.getItem('reader-line-height');
+    if (savedLineHeight) {
+      setLineHeight(parseFloat(savedLineHeight));
     }
   }, []);
 
@@ -270,12 +295,15 @@ export default function ReaderPage() {
     };
   }, [bookId]);
 
-  // Update font size when changed
+  // Update font settings when changed
   useEffect(() => {
     if (rendition) {
       rendition.themes.fontSize(`${fontSize}px`);
+      rendition.themes.font(fontFamily);
+      rendition.themes.override("color", '#3a3a3a', true);
+      rendition.themes.override("line-height", lineHeight.toString(), true);
     }
-  }, [fontSize, rendition]);
+  }, [fontSize, fontFamily, lineHeight, rendition]);
 
   // Get spine items between current chapter and next chapter
   const getSpineItemsForHref = useCallback((href: string): string[] => {
@@ -366,6 +394,11 @@ export default function ReaderPage() {
         });
 
         renditionInstance.themes.fontSize(`${fontSize}px`);
+        renditionInstance.themes.font(fontFamily);
+        renditionInstance.themes.register('*', {
+          'line-height': lineHeight.toString(),
+          'color': '#4a4a4a',
+        });
 
         renditionInstance.on('relocated', (location: { start: { href: string } }) => {
           setCurrentChapter(location.start.href);
@@ -1195,7 +1228,7 @@ export default function ReaderPage() {
     );
   }
 
-  const currentChapterTitle = chapters.find(c => c.href === currentChapter)?.label || '';
+  const currentChapterTitle = chapters.find(c => currentChapter.includes(c.href) || c.href.includes(currentChapter))?.label || '';
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 to-slate-100">
@@ -1218,8 +1251,9 @@ export default function ReaderPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Font size controls */}
+          {/* Font settings */}
           <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1">
+            {/* Font size controls */}
             <button
               onClick={() => handleFontSizeChange(fontSize - 2)}
               className="w-8 h-8 flex items-center justify-center rounded text-slate-600 hover:bg-white hover:shadow-sm transition-all"
@@ -1234,6 +1268,58 @@ export default function ReaderPage() {
               onClick={() => handleFontSizeChange(fontSize + 2)}
               className="w-8 h-8 flex items-center justify-center rounded text-slate-600 hover:bg-white hover:shadow-sm transition-all"
               title="增大字体"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+
+            {/* Divider */}
+            <div className="w-px h-6 bg-slate-300 mx-1"></div>
+
+            {/* Font family dropdown */}
+            <select
+              value={fontFamily}
+              onChange={(e) => {
+                setFontFamily(e.target.value);
+                localStorage.setItem('reader-font-family', e.target.value);
+              }}
+              className="h-8 px-2 text-sm bg-white border border-slate-200 rounded text-slate-600 cursor-pointer hover:border-slate-300 focus:outline-none focus:border-indigo-400"
+              title="字体"
+            >
+              {fontOptions.map((font) => (
+                <option key={font.value} value={font.value}>
+                  {font.label}
+                </option>
+              ))}
+            </select>
+
+            {/* Divider */}
+            <div className="w-px h-6 bg-slate-300 mx-1"></div>
+
+            {/* Line height controls */}
+            <button
+              onClick={() => {
+                const newHeight = Math.max(1.2, lineHeight - 0.2);
+                setLineHeight(newHeight);
+                localStorage.setItem('reader-line-height', newHeight.toString());
+              }}
+              className="w-8 h-8 flex items-center justify-center rounded text-slate-600 hover:bg-white hover:shadow-sm transition-all"
+              title="减小行距"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+              </svg>
+            </button>
+            <span className="text-sm text-slate-600 w-10 text-center">{lineHeight}</span>
+            <button
+              onClick={() => {
+                const newHeight = Math.min(3.0, lineHeight + 0.2);
+                setLineHeight(newHeight);
+                localStorage.setItem('reader-line-height', newHeight.toString());
+              }}
+              className="w-8 h-8 flex items-center justify-center rounded text-slate-600 hover:bg-white hover:shadow-sm transition-all"
+              title="增大行距"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -1274,7 +1360,8 @@ export default function ReaderPage() {
             </div>
             <ul className="space-y-1 mt-4">
               {chapters.map((chapter) => {
-                const isActive = currentChapter.includes(chapter.href) || chapter.href.includes(currentChapter);
+                const activeHref = selectedChapter || currentChapter;
+                const isActive = activeHref.includes(chapter.href) || chapter.href.includes(activeHref);
                 return (
                   <li key={chapter.id}>
                     <button
@@ -1385,7 +1472,7 @@ export default function ReaderPage() {
             <div
               ref={viewerRef}
               className="h-full min-h-[calc(100vh-120px)]"
-              style={{ background: '#fff', color: '#333' }}
+              style={{ background: '#fff', color: '#4a4a4a' }}
             />
           ) : (
             <div className="h-full min-h-[calc(100vh-120px)] flex items-center justify-center bg-slate-50">
