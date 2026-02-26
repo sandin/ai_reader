@@ -13,6 +13,10 @@ interface ChatPanelProps {
   isSelectedBlocksExpanded: boolean;
   aiLoading: boolean;
   inputHistory: string[];
+  // Reader style
+  fontSize?: number;
+  fontFamily?: string;
+  lineHeight?: number;
   // Callbacks
   onSendMessage: (input: string, isFirstMessage: boolean) => void;
   onSwitchSession: (sessionId: string) => void;
@@ -33,6 +37,9 @@ export default function ChatPanel({
   isSelectedBlocksExpanded,
   aiLoading,
   inputHistory,
+  fontSize = 18,
+  fontFamily = 'Georgia, serif',
+  lineHeight = 1.8,
   onSendMessage,
   onSwitchSession,
   onCreateSession,
@@ -50,12 +57,12 @@ export default function ChatPanel({
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  // Auto scroll to bottom when messages change
+  // Auto scroll to bottom when messages change (only when not streaming)
   useEffect(() => {
-    if (chatContainerRef.current) {
+    if (!aiLoading && chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, aiLoading]);
 
   const handleInputChange = (value: string) => {
     setInput(value);
@@ -285,11 +292,16 @@ export default function ChatPanel({
               className={`${msg.role === 'user' ? 'ml-8' : 'mr-8'}`}
             >
               <div
-                className={`px-4 py-3 rounded-2xl text-sm ${
+                className={`px-4 py-3 rounded-2xl ${
                   msg.role === 'user'
                     ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-br-md'
                     : 'bg-slate-100 text-slate-800 rounded-bl-md'
                 }`}
+                style={{
+                  fontSize: `${fontSize}px`,
+                  fontFamily,
+                  lineHeight,
+                }}
               >
                 {msg.role === 'assistant' ? (
                   <MessageContent content={msg.blocks.map(b => b.content).join('\n\n')} isStreaming={aiLoading && index === messages.length - 1} />

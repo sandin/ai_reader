@@ -509,7 +509,7 @@ export default function ReaderPage() {
     let userContent = input;
     if (isFirstMessage && selectedBlocks.length > 0) {
       const selectedText = selectedBlocks.map(b => b.content).join('\n\n');
-      userContent = `选中文本：\n${selectedText}\n\n${input}`;
+      userContent = `选中文本：\n${selectedText}\n\n用户提问：${input}`;
     }
 
     const userMessage: Message = {
@@ -1277,6 +1277,9 @@ export default function ReaderPage() {
                   isSelectedBlocksExpanded={isSelectedBlocksExpanded}
                   aiLoading={aiLoading}
                   inputHistory={inputHistory}
+                  fontSize={fontSize}
+                  fontFamily={fontFamily}
+                  lineHeight={lineHeight}
                   onSendMessage={(input, isFirst) => handleSendMessage(input, isFirst)}
                   onSwitchSession={switchToSession}
                   onCreateSession={createNewSession}
