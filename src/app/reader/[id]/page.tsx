@@ -2,120 +2,65 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import Link from 'next/link';
+import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import ePub, { Book, Rendition, NavItem } from 'epubjs';
-import ReactMarkdown from 'react-markdown';
-
-interface Chapter {
-  id: string;
-  label: string;
-  href: string;
-}
-
-// Tree structure for TOC
-interface TreeNode {
-  chapter_id: string;
-  chapter_name: string;
-  href: string;
-  contents: string[];
-  children: TreeNode[];
-}
-
-interface ChapterIndex {
-  tree: TreeNode[];
-  htmlOrder: string[];
-}
-
-interface Block {
-  id: string;
-  content: string;
-  cfiRange?: string;
-  timestamp: number;
-}
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  blocks: Block[];
-  timestamp: number;
-}
-
+import {
+  Chapter,
+  ChapterIndex,
+  Block,
+  Message,
+  Session,
+  Comment,
+  ReaderHeader,
+  TableOfContents,
+  ChatPanel,
+  CommentPanel,
+  ContextMenu,
+  EditSessionModal,
+  LoadingState,
+  ErrorState,
+} from '@/components/reader';
 
 export default function ReaderPage() {
   const params = useParams();
   const bookId = params.id as string;
 
+  // Book and rendition state
   const [book, setBook] = useState<Book | null>(null);
   const [rendition, setRendition] = useState<Rendition | null>(null);
+
+  // Chapter and navigation state
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [currentChapter, setCurrentChapter] = useState<string>('');
+  const [chapterIndex, setChapterIndex] = useState<ChapterIndex>({ tree: [], htmlOrder: [] });
+
+  // Loading and error state
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
+
+  // Font settings state
   const [fontSize, setFontSize] = useState(18);
   const [fontFamily, setFontFamily] = useState('Georgia, serif');
   const [lineHeight, setLineHeight] = useState(1.8);
-  const [savedCfi, setSavedCfi] = useState<string | null>(null);
-  const [savedHtmlFile, setSavedHtmlFile] = useState<string>('');
-  // Chapter index: htmlFile -> { chapterTitle, chapterHref }
-  const [chapterIndex, setChapterIndex] = useState<ChapterIndex>({ tree: [], htmlOrder: [] });
-  const currentCfiRef = useRef<string>('');
-  const saveProgressTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 可选字体列表 - 跨平台系统字体 + webfont
-  const fontOptions = [
-    // 系统字体
-    { value: 'Georgia, "Times New Roman", serif', label: '衬线体' },
-    { value: 'Arial, Helvetica, sans-serif', label: '无衬线' },
-    { value: '"PingFang SC", "Hiragino Sans GB", "Heiti SC", sans-serif', label: '苹方 PingFang' },
-    { value: '"Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif', label: '微软雅黑' },
-    { value: '"SimSun", "STSong", serif', label: '宋体' },
-    { value: 'Menlo, Monaco, "Courier New", monospace', label: '等宽字体' },
-    { value: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif', label: '系统默认' },
-    // Webfont
-    { value: '"Noto Sans SC", "Microsoft YaHei", sans-serif', label: '思源黑体' },
-    { value: '"Noto Serif SC", "SimSun", serif', label: '思源宋体' },
-  ];
+  // Reading progress state
+  const [savedCfi, setSavedCfi] = useState<string | null>(null);
+
+  // UI state
   const [showToc, setShowToc] = useState(true);
-  // Track expanded tree nodes
-  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
-  const [selectedChapter, setSelectedChapter] = useState<string | null>(null);
   const [isContentReady, setIsContentReady] = useState(false);
   const [bookTitle, setBookTitle] = useState<string>('');
 
+  // Chat state
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
-  const [aiLoading, setAiLoading] = useState(false);
-
-  // 输入历史相关状态
-  const [inputHistory, setInputHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
-
-  // 加载输入历史
-  useEffect(() => {
-    const savedHistory = localStorage.getItem('ai-chat-input-history');
-    if (savedHistory) {
-      try {
-        setInputHistory(JSON.parse(savedHistory));
-      } catch (e) {
-        console.error('Failed to parse input history:', e);
-      }
-    }
-  }, []);
   const [selectedBlocks, setSelectedBlocks] = useState<Block[]>([]);
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
   const [isSelectedBlocksExpanded, setIsSelectedBlocksExpanded] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [inputHistory, setInputHistory] = useState<string[]>([]);
 
-  // Session management
-  const [sessions, setSessions] = useState<Array<{
-    id: string;
-    title: string;
-    selectedBlocks: Block[];
-    messages: Message[];
-    timestamp: number;
-  }>>([]);
+  // Session state
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 
   // Edit session modal state
@@ -129,18 +74,10 @@ export default function ReaderPage() {
   const [contextMenuSelection, setContextMenuSelection] = useState('');
   const [contextMenuCfiRange, setContextMenuCfiRange] = useState('');
 
-  // Tab state: 'chat' or 'comment'
+  // Tab state
   const [activeTab, setActiveTab] = useState<'chat' | 'comment'>('chat');
 
-  // Comment data structures
-  interface Comment {
-    id: string;
-    content: string;
-    selectedText: string;
-    cfiRange: string;
-    chapter: string;
-    timestamp: number;
-  }
+  // Comment state
   const [comments, setComments] = useState<Comment[]>([]);
   const [currentCommentText, setCurrentCommentText] = useState('');
   const [commentSelection, setCommentSelection] = useState('');
@@ -149,126 +86,46 @@ export default function ReaderPage() {
   // Comment annotation refs
   const commentRefs = useRef<Map<string, string>>(new Map());
 
-  // Panel layout state for persistence
-  const [tocWidth, setTocWidth] = useState(288); // default 72 * 4 = 288px
-  const [chatWidth, setChatWidth] = useState(320); // default 80 * 4 = 320px
-  const [isResizingLeft, setIsResizingLeft] = useState(false);
-  const [isResizingRight, setIsResizingRight] = useState(false);
+  // Highlight refs
+  const highlightRefs = useRef<Map<string, string>>(new Map());
 
-  const containerRef = useRef<HTMLDivElement>(null);
+  // Refs
   const viewerRef = useRef<HTMLDivElement>(null);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
   const selectionHandlerAdded = useRef(false);
-  const isResizingRef = useRef(false);
+  const saveProgressTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const prevSelectedBlocksRef = useRef<string>('');
 
-  // Load panel layout from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem('reader-panel-layout');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.tocWidth) setTocWidth(parsed.tocWidth);
-        if (parsed.chatWidth) setChatWidth(parsed.chatWidth);
-      } catch (e) {
-        // ignore parse error
-      }
-    }
-  }, []);
+  // ==================== Initialization ====================
 
-  // Save panel layout to localStorage
-  useEffect(() => {
-    localStorage.setItem('reader-panel-layout', JSON.stringify({ tocWidth, chatWidth }));
-  }, [tocWidth, chatWidth]);
-
-  // Handle left resize
-  const handleMouseDownLeft = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    isResizingRef.current = true;
-    setIsResizingLeft(true);
-  }, []);
-
-  const handleMouseDownRight = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    isResizingRef.current = true;
-    setIsResizingRight(true);
-  }, []);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!containerRef.current) return;
-
-      const containerRect = containerRef.current.getBoundingClientRect();
-      const containerWidth = containerRect.width;
-
-      if (isResizingLeft) {
-        const newWidth = e.clientX - containerRect.left;
-        const minWidth = containerWidth * 0.15;
-        const maxWidth = containerWidth * 0.4;
-        setTocWidth(Math.min(maxWidth, Math.max(minWidth, newWidth)));
-      }
-
-      if (isResizingRight) {
-        const newWidth = containerRect.right - e.clientX;
-        const minWidth = containerWidth * 0.15;
-        const maxWidth = containerWidth * 0.5;
-        setChatWidth(Math.min(maxWidth, Math.max(minWidth, newWidth)));
-      }
-    };
-
-    const handleMouseUp = async () => {
-      isResizingRef.current = false;
-      setIsResizingLeft(false);
-      setIsResizingRight(false);
-    };
-
-    if (isResizingLeft || isResizingRight) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-    }
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [currentChapter, rendition, isResizingLeft, isResizingRight]);
-
-  // Load font settings from localStorage
+  // panel layout from Load font settings and localStorage
   useEffect(() => {
     const savedFontSize = localStorage.getItem('reader-font-size');
-    if (savedFontSize) {
-      setFontSize(parseInt(savedFontSize, 10));
-    }
+    if (savedFontSize) setFontSize(parseInt(savedFontSize, 10));
+
     const savedFontFamily = localStorage.getItem('reader-font-family');
-    if (savedFontFamily) {
-      setFontFamily(savedFontFamily);
-    }
+    if (savedFontFamily) setFontFamily(savedFontFamily);
+
     const savedLineHeight = localStorage.getItem('reader-line-height');
-    if (savedLineHeight) {
-      setLineHeight(parseFloat(savedLineHeight));
+    if (savedLineHeight) setLineHeight(parseFloat(savedLineHeight));
+
+    const savedHistory = localStorage.getItem('ai-chat-input-history');
+    if (savedHistory) {
+      try {
+        setInputHistory(JSON.parse(savedHistory));
+      } catch (e) { /* ignore */ }
     }
   }, []);
 
-  // Save font size to localStorage
-  const handleFontSizeChange = (newSize: number) => {
-    const clamped = Math.min(32, Math.max(14, newSize));
-    setFontSize(clamped);
-    localStorage.setItem('reader-font-size', clamped.toString());
-  };
-
-  // Hide context menu when selection changes
+  // Save font settings
   useEffect(() => {
-    const handleSelectionChange = () => {
-      const selection = window.getSelection();
-      if (!selection || selection.isCollapsed) {
-        setShowContextMenu(false);
-      }
-    };
+    localStorage.setItem('reader-font-size', fontSize.toString());
+  }, [fontSize]);
 
-    document.addEventListener('selectionchange', handleSelectionChange);
-    return () => {
-      document.removeEventListener('selectionchange', handleSelectionChange);
-    };
-  }, []);
+  useEffect(() => {
+    localStorage.setItem('reader-line-height', lineHeight.toString());
+  }, [lineHeight]);
+
+  // ==================== Book Loading ====================
 
   useEffect(() => {
     let bookInstance: Book | null = null;
@@ -279,15 +136,10 @@ export default function ReaderPage() {
         setError('');
 
         const res = await fetch(`/api/book/${bookId}`);
-        if (!res.ok) {
-          throw new Error('Failed to load book');
-        }
+        if (!res.ok) throw new Error('Failed to load book');
 
         const data = await res.json();
-        // Set book title from API response
-        if (data.title) {
-          setBookTitle(data.title);
-        }
+        if (data.title) setBookTitle(data.title);
 
         const bookData = Uint8Array.from(atob(data.content), c => c.charCodeAt(0));
         const bookBuffer = bookData.buffer.slice(
@@ -306,162 +158,15 @@ export default function ReaderPage() {
           label: item.label,
           href: item.href,
         }));
-
         setChapters(chapterList);
 
-        // Build and save chapter index with tree structure
-        try {
-          // Try to get existing index first
-          const indexRes = await fetch(`/api/index?bookId=${bookId}`);
-          let loadedIndex: ChapterIndex = { tree: [], htmlOrder: [] };
-          if (indexRes.ok) {
-            loadedIndex = await indexRes.json();
-          }
-          // If index is empty or doesn't exist, create new one
-          if (!loadedIndex.tree || loadedIndex.tree.length === 0) {
-            // Get manifest items to build html order
-            const manifest = bookInstance.loaded.manifest as any;
-            // Use spine to get HTML file order
-            const spine = bookInstance.spine as any;
-            const spineItems = spine ? Array.from(spine.items || spine) : [];
-            const htmlOrder = spineItems
-              .filter((item: any) => item.href)
-              .map((item: any) => item.href);
-            console.log('HTML order from spine:', htmlOrder.length, htmlOrder.slice(0, 5));
+        // Build chapter index
+        await buildChapterIndex(bookInstance, toc);
 
-            // Build tree from navigation.toc (which is already hierarchical)
-            console.log('TOC structure sample:', JSON.stringify(toc.slice(0, 2), null, 2));
+        // Load saved progress
+        await loadSavedProgress(chapterList);
 
-            const buildTree = (navItems: any[]): TreeNode[] => {
-              const nodes: TreeNode[] = [];
-              for (let i = 0; i < navItems.length; i++) {
-                const nav = navItems[i];
-                const href = nav.href || '';
-                const firstHtml = href.split('#')[0];
-
-                // Calculate contents: from this chapter's first HTML to next chapter's first HTML
-                const contents: string[] = [];
-                const currentIndex = htmlOrder.findIndex(h => h.includes(firstHtml.split('/').pop() || ''));
-
-                if (currentIndex !== -1) {
-                  // Add all HTMLs until the next chapter starts
-                  for (let j = currentIndex; j < htmlOrder.length; j++) {
-                    const nextChapterHref = navItems[i + 1]?.href || '';
-                    const nextChapterFirstHtml = nextChapterHref.split('#')[0];
-                    const nextChapterIndex = htmlOrder.findIndex(h => h.includes(nextChapterFirstHtml.split('/').pop() || ''));
-
-                    if (nextChapterIndex !== -1 && j >= nextChapterIndex) {
-                      break;
-                    }
-                    contents.push(htmlOrder[j]);
-                  }
-                }
-
-                // Check for children - epubjs uses 'subitems' or 'children'
-                const childItems = nav.subitems || nav.children || [];
-                const node: TreeNode = {
-                  chapter_id: nav.id || `chapter_${i}`,
-                  chapter_name: (nav.label || '').trim(),
-                  href: nav.href || '',
-                  contents: contents,
-                  children: childItems.length > 0 ? buildTree(childItems) : [],
-                };
-                nodes.push(node);
-              }
-              return nodes;
-            };
-
-            const tree = buildTree(toc);
-            console.log('Building tree:', tree.length, 'chapters');
-            console.log('HTML order:', htmlOrder.length, 'files');
-
-            // Save to server
-            const saveRes = await fetch('/api/index', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                bookId,
-                tree,
-                htmlOrder,
-              }),
-            });
-            const saveResult = await saveRes.json();
-            console.log('Save index result:', saveResult);
-
-            if (saveResult.success) {
-              setChapterIndex({ tree, htmlOrder });
-            } else {
-              console.error('Failed to save index:', saveResult.error);
-            }
-          } else {
-            setChapterIndex(loadedIndex);
-          }
-        } catch (err) {
-          console.error('Failed to load/save chapter index:', err);
-        }
-
-        // Don't render content immediately, wait for user to select a chapter
         setIsContentReady(true);
-
-        // Try to load saved reading progress
-        let defaultChapter = toc.length > 0 ? toc[0].href : '';
-        let loadedCfi: string | null = null;
-        let loadedHtmlFile = '';
-        try {
-          const progressRes = await fetch(`/api/progress?bookId=${bookId}`);
-          if (progressRes.ok) {
-            const progressData = await progressRes.json();
-            if (progressData.htmlFile) {
-              loadedHtmlFile = progressData.htmlFile;
-              // Verify the saved chapter exists in this book
-              const savedChapterExists = chapterList.some(
-                (c: Chapter) => c.href.includes(loadedHtmlFile) || loadedHtmlFile.includes(c.href.split('#')[0].split('/').pop() || '')
-              );
-              if (savedChapterExists) {
-                // Find matching chapter from TOC using the index tree
-                const htmlFileName = loadedHtmlFile.split('/').pop() || loadedHtmlFile;
-                const findInTree = (nodes: TreeNode[]): TreeNode | null => {
-                  for (const node of nodes) {
-                    if (node.contents.some(c => c.includes(htmlFileName) || htmlFileName.includes(c))) {
-                      return node;
-                    }
-                    if (node.children.length > 0) {
-                      const found = findInTree(node.children);
-                      if (found) return found;
-                    }
-                  }
-                  return null;
-                };
-                const indexInfo = findInTree(chapterIndex.tree);
-                if (indexInfo) {
-                  defaultChapter = indexInfo.contents[0] || '';
-                } else {
-                  // Fallback: find from chapters list
-                  const matched = chapterList.find(c => c.href.split('#')[0].split('/').pop() === htmlFileName);
-                  if (matched) {
-                    defaultChapter = matched.href;
-                  }
-                }
-              }
-            }
-            // Save CFI for bookmark restoration
-            if (progressData.cfi) {
-              loadedCfi = progressData.cfi;
-            }
-          }
-        } catch (err) {
-          console.error('Failed to load reading progress:', err);
-        }
-
-        // Set saved data for later use when displaying
-        setSavedCfi(loadedCfi);
-        setSavedHtmlFile(loadedHtmlFile);
-
-        if (defaultChapter) {
-          // Set default chapter and auto-display it
-          setCurrentChapter(defaultChapter);
-          setSelectedChapter(defaultChapter);
-        }
       } catch (err) {
         console.error('Error loading book:', err);
         setError('加载书籍失败');
@@ -470,90 +175,232 @@ export default function ReaderPage() {
       }
     };
 
-    if (bookId) {
-      initBook();
-    }
+    if (bookId) initBook();
 
     return () => {
-      if (bookInstance) {
-        bookInstance.destroy();
-      }
+      if (bookInstance) bookInstance.destroy();
     };
   }, [bookId]);
 
+  // Build chapter index
+  const buildChapterIndex = async (bookInstance: Book, toc: NavItem[]) => {
+    try {
+      const indexRes = await fetch(`/api/index?bookId=${bookId}`);
+      let loadedIndex: ChapterIndex = { tree: [], htmlOrder: [] };
+      if (indexRes.ok) loadedIndex = await indexRes.json();
+
+      if (!loadedIndex.tree || loadedIndex.tree.length === 0) {
+        const spine = bookInstance.spine as any;
+        const spineItems = spine ? Array.from(spine.items || spine) : [];
+        const htmlOrder = spineItems
+          .filter((item: any) => item.href)
+          .map((item: any) => item.href);
+
+        const buildTree = (navItems: any[]): any[] => {
+          return navItems.map((nav, i) => {
+            const href = nav.href || '';
+            const firstHtml = href.split('#')[0];
+            const contents: string[] = [];
+            const currentIndex = htmlOrder.findIndex(h => h.includes(firstHtml.split('/').pop() || ''));
+
+            if (currentIndex !== -1) {
+              for (let j = currentIndex; j < htmlOrder.length; j++) {
+                const nextChapterHref = navItems[i + 1]?.href || '';
+                const nextChapterFirstHtml = nextChapterHref.split('#')[0];
+                const nextChapterIndex = htmlOrder.findIndex(h => h.includes(nextChapterFirstHtml.split('/').pop() || ''));
+                if (nextChapterIndex !== -1 && j >= nextChapterIndex) break;
+                contents.push(htmlOrder[j]);
+              }
+            }
+
+            const childItems = nav.subitems || nav.children || [];
+            return {
+              chapter_id: nav.id || `chapter_${i}`,
+              chapter_name: (nav.label || '').trim(),
+              href: nav.href || '',
+              contents,
+              children: childItems.length > 0 ? buildTree(childItems) : [],
+            };
+          });
+        };
+
+        const tree = buildTree(toc);
+
+        await fetch('/api/index', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bookId, tree, htmlOrder }),
+        });
+
+        setChapterIndex({ tree, htmlOrder });
+      } else {
+        setChapterIndex(loadedIndex);
+      }
+    } catch (err) {
+      console.error('Failed to build chapter index:', err);
+    }
+  };
+
+  // Load saved reading progress
+  const loadSavedProgress = async (chapterList: Chapter[]) => {
+    try {
+      const progressRes = await fetch(`/api/progress?bookId=${bookId}`);
+      if (progressRes.ok) {
+        const progressData = await progressRes.json();
+        if (progressData.htmlFile) {
+          const savedChapterExists = chapterList.some(
+            (c: Chapter) => c.href.includes(progressData.htmlFile) || progressData.htmlFile.includes(c.href.split('#')[0].split('/').pop() || '')
+          );
+          if (savedChapterExists) {
+            const htmlFileName = progressData.htmlFile.split('/').pop() || progressData.htmlFile;
+            const findInTree = (nodes: any[]): any => {
+              for (const node of nodes) {
+                if (node.contents.some((c: string) => c.includes(htmlFileName) || htmlFileName.includes(c))) return node;
+                if (node.children.length > 0) {
+                  const found = findInTree(node.children);
+                  if (found) return found;
+                }
+              }
+              return null;
+            };
+            const indexInfo = findInTree(chapterIndex.tree);
+            if (indexInfo) {
+              setCurrentChapter(indexInfo.contents[0] || '');
+            } else {
+              const matched = chapterList.find((c: Chapter) => c.href.split('#')[0].split('/').pop() === htmlFileName);
+              if (matched) setCurrentChapter(matched.href);
+            }
+          }
+        }
+        if (progressData.cfi) setSavedCfi(progressData.cfi);
+      }
+    } catch (err) {
+      console.error('Failed to load reading progress:', err);
+    }
+  };
+
+  // ==================== Rendition ====================
+
+  // Create rendition instance
+  const createRenditionInstance = useCallback(() => {
+    if (!viewerRef.current || !book) return null;
+    return book.renderTo(viewerRef.current, {
+      width: '100%',
+      height: '100%',
+      spread: 'none',
+      flow: 'scrolled' as any,
+    });
+  }, [book]);
+
+  // Setup rendition
+  const setupRendition = useCallback(async (renditionInstance: Rendition, initialChapter?: string) => {
+    renditionInstance.themes.fontSize(`${fontSize}px`);
+    renditionInstance.themes.font(fontFamily);
+    renditionInstance.themes.override("color", '#3a3a3a', true);
+    renditionInstance.themes.override("line-height", lineHeight.toString(), true);
+
+    // Location change handler
+    renditionInstance.on('relocated', (location: { start: { href: string; cfi: string } }) => {
+      const href = location.start.href;
+      setCurrentChapter(href);
+      const cfi = location.start.cfi;
+
+      if (saveProgressTimeoutRef.current) clearTimeout(saveProgressTimeoutRef.current);
+      saveProgressTimeoutRef.current = setTimeout(() => {
+        const htmlFile = href.split('#')[0];
+        saveProgress(htmlFile, cfi);
+      }, 2000);
+    });
+
+    // Bind iframe events
+    if (!selectionHandlerAdded.current) {
+      selectionHandlerAdded.current = true;
+      renditionInstance.on('rendered', () => {
+        const tryBind = (attempts: number) => {
+          if (attempts <= 0) return;
+          const container = viewerRef.current;
+          const iframe = container?.querySelector('iframe');
+
+          if (iframe && iframe.contentWindow) {
+            const win = iframe.contentWindow;
+
+            // Context menu
+            win.addEventListener('contextmenu', (e: MouseEvent) => {
+              e.preventDefault();
+              setTimeout(() => {
+                const selection = win.getSelection();
+                const selectedText = selection ? selection.toString().trim() : '';
+
+                if (selectedText && selection && selection.rangeCount > 0) {
+                  const iframeRect = iframe.getBoundingClientRect();
+                  setContextMenuPosition({
+                    x: iframeRect.left + e.clientX,
+                    y: iframeRect.top + e.clientY
+                  });
+                  setContextMenuSelection(selectedText);
+                  setShowContextMenu(true);
+                }
+              }, 10);
+            });
+
+            // Selected event for CFI
+            renditionInstance.on('selected', (cfiRange: string) => {
+              setContextMenuCfiRange(cfiRange);
+            });
+          } else {
+            setTimeout(() => tryBind(attempts - 1), 500);
+          }
+        };
+        tryBind(5);
+      });
+    }
+
+    // Display initial chapter
+    if (initialChapter) {
+      if (savedCfi) {
+        await renditionInstance.display(savedCfi);
+        setSavedCfi(null);
+      } else {
+        await renditionInstance.display(initialChapter);
+      }
+    }
+  }, [fontSize, fontFamily, lineHeight, savedCfi, bookId]);
+
   // Auto-display saved chapter when book is loaded
   useEffect(() => {
-    if (isContentReady && book && selectedChapter && !rendition && viewerRef.current) {
-      // Wait for viewer to be ready
+    if (isContentReady && book && currentChapter && !rendition && viewerRef.current) {
       const timer = setTimeout(async () => {
         const renditionInstance = createRenditionInstance();
         if (!renditionInstance) return;
-
-        setupRenditionEvents(renditionInstance, { initialChapter: selectedChapter || undefined });
-
+        setupRendition(renditionInstance, currentChapter);
         setRendition(renditionInstance);
-
-        // Use saved CFI to restore bookmark if available
-        if (savedCfi) {
-          await renditionInstance.display(savedCfi);
-          setSavedCfi(null); // Clear after use
-        } else {
-          await renditionInstance.display(selectedChapter);
-        }
       }, 100);
-
       return () => clearTimeout(timer);
     }
-  }, [isContentReady, book, selectedChapter, rendition, fontSize, fontFamily, lineHeight, bookId, savedCfi]);
+  }, [isContentReady, book, currentChapter, rendition, createRenditionInstance, setupRendition]);
 
-  // Update font settings when changed
-  useEffect(() => {
-    if (rendition) {
-      rendition.themes.fontSize(`${fontSize}px`);
-      rendition.themes.font(fontFamily);
-      rendition.themes.override("color", '#3a3a3a', true);
-      rendition.themes.override("line-height", lineHeight.toString(), true);
-    }
-  }, [fontSize, fontFamily, lineHeight, rendition]);
+  // ==================== Save Progress ====================
 
-  // Save reading progress to server (only htmlFile is needed, chapter info is in index.json)
-  const saveProgress = useCallback((chapter: string, cfi?: string, onSuccess?: () => void) => {
+  const saveProgress = useCallback((chapter: string, cfi?: string) => {
     if (!bookId || !chapter) return;
     const htmlFile = chapter.split('#')[0].split('/').pop() || chapter;
     fetch('/api/progress', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        bookId,
-        chapter: htmlFile,
-        cfi: cfi || '',
-      }),
-    }).then(() => {
-      if (onSuccess) onSuccess();
+      body: JSON.stringify({ bookId, chapter: htmlFile, cfi: cfi || '' }),
     }).catch(err => console.error('Failed to save progress:', err));
   }, [bookId]);
 
+  // ==================== Chapter Navigation ====================
+
   const handleChapterClick = useCallback(async (href: string) => {
-    // Find chapter title from chapters list
-    const matchedChapter = chapters.find(c => c.href === href);
-    const chapterTitle = matchedChapter?.label || '';
-
-    // Set selected chapter first
-    setSelectedChapter(href);
-
-    // Create rendition if not exists
     if (!rendition && book && viewerRef.current) {
-      // Wait for React to render the viewer container
       await new Promise(resolve => setTimeout(resolve, 50));
-
       if (viewerRef.current) {
         const renditionInstance = createRenditionInstance();
         if (!renditionInstance) return;
-
-        setupRenditionEvents(renditionInstance, { initialChapter: href });
-
+        setupRendition(renditionInstance, href);
         setRendition(renditionInstance);
-        await renditionInstance.display(href);
       }
     } else if (rendition) {
       await rendition.display(href);
@@ -561,9 +408,9 @@ export default function ReaderPage() {
 
     setCurrentChapter(href);
     saveProgress(href);
-  }, [rendition, book, saveProgress]);
+  }, [rendition, book, createRenditionInstance, setupRendition, saveProgress]);
 
-  // Get current page number based on htmlOrder
+  // Get current page number
   const getCurrentPageNumber = () => {
     if (!currentChapter || !chapterIndex.htmlOrder || chapterIndex.htmlOrder.length === 0) return 0;
     const currentHtml = currentChapter.split('#')[0];
@@ -571,47 +418,36 @@ export default function ReaderPage() {
     return index >= 0 ? index + 1 : 0;
   };
 
-  const totalPages = chapterIndex.htmlOrder?.length || 0;
   const currentPage = getCurrentPageNumber();
+  const totalPages = chapterIndex.htmlOrder?.length || 0;
 
-  // Navigate to previous page using htmlOrder
+  // Navigate prev/next page
   const handlePrevPage = useCallback(async () => {
     if (currentPage > 1 && rendition) {
-      const newIndex = currentPage - 2; // -2 because currentPage is 1-based
+      const newIndex = currentPage - 2;
       const newHref = chapterIndex.htmlOrder[newIndex];
       setCurrentChapter(newHref);
       saveProgress(newHref);
-      try {
-        await rendition.display(newHref);
-      } catch (err) {
-        console.error('Error displaying prev:', err);
-      }
+      await rendition.display(newHref);
     }
   }, [currentPage, chapterIndex.htmlOrder, rendition, saveProgress]);
 
-  // Navigate to next page using htmlOrder
   const handleNextPage = useCallback(async () => {
     if (currentPage < totalPages && rendition) {
       const newHref = chapterIndex.htmlOrder[currentPage];
       setCurrentChapter(newHref);
       saveProgress(newHref);
-      try {
-        await rendition.display(newHref);
-      } catch (err) {
-        console.error('Error displaying next:', err);
-      }
+      await rendition.display(newHref);
     }
   }, [currentPage, totalPages, chapterIndex.htmlOrder, rendition, saveProgress]);
 
-  const handleSendMessage = async () => {
+  // ==================== Chat ====================
+
+  const handleSendMessage = async (input: string, isFirstMessage: boolean) => {
     if (!input.trim() || aiLoading) return;
 
-    // 检查是否是第一次发送消息
-    const isFirstMessage = messages.length === 0;
-
-    // 构建用户消息内容，只有第一次发送时才包含选中文本
     let userContent = input;
-    if (isFirstMessage && selectedBlocks && selectedBlocks.length > 0) {
+    if (isFirstMessage && selectedBlocks.length > 0) {
       const selectedText = selectedBlocks.map(b => b.content).join('\n\n');
       userContent = `选中文本：\n${selectedText}\n\n${input}`;
     }
@@ -619,21 +455,14 @@ export default function ReaderPage() {
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      blocks: [{
-        id: Date.now().toString(),
-        content: userContent,
-        timestamp: Date.now(),
-      }],
+      blocks: [{ id: Date.now().toString(), content: userContent, timestamp: Date.now() }],
       timestamp: Date.now(),
     };
 
     setMessages(prev => [...prev, userMessage]);
-    setInput('');
     setAiLoading(true);
-    setHistoryIndex(-1);
-    setShowSuggestions(false);
 
-    // 保存输入到历史记录
+    // Save to history
     if (input.trim()) {
       const newHistory = [input, ...inputHistory.filter(h => h !== input)].slice(0, 50);
       setInputHistory(newHistory);
@@ -641,34 +470,28 @@ export default function ReaderPage() {
     }
 
     try {
-      // 准备历史消息
       const history = messages.map(msg => ({
         role: msg.role,
         content: msg.blocks.map(b => b.content).join('\n\n'),
       }));
 
-      // 创建初始的空 assistant 消息用于流式更新
       const assistantMessageId = (Date.now() + 1).toString();
       const assistantMessage: Message = {
         id: assistantMessageId,
         role: 'assistant',
-        blocks: [{
-          id: assistantMessageId,
-          content: '',
-          timestamp: Date.now(),
-        }],
+        blocks: [{ id: assistantMessageId, content: '', timestamp: Date.now() }],
         timestamp: Date.now(),
       };
 
       const newMessages = [...messages, userMessage, assistantMessage];
       setMessages(newMessages);
 
-      // Create new session if doesn't exist, or update existing session
+      // Create/update session
       let sessionId = currentSessionId;
       if (!sessionId) {
         sessionId = Date.now().toString();
         setCurrentSessionId(sessionId);
-        const newSession = {
+        const newSession: Session = {
           id: sessionId,
           title: `对话 ${sessions.length + 1}`,
           selectedBlocks,
@@ -677,33 +500,19 @@ export default function ReaderPage() {
         };
         setSessions(prev => [...prev, newSession]);
       } else {
-        // Update existing session's messages
         setSessions(prev => prev.map(s =>
-          s.id === sessionId
-            ? { ...s, messages: newMessages, timestamp: Date.now() }
-            : s
+          s.id === sessionId ? { ...s, messages: newMessages, timestamp: Date.now() } : s
         ));
       }
 
-      // 使用流式 fetch
+      // Stream response
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: userContent,
-          history,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userContent, history }),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to get response');
-      }
-
-      if (!response.body) {
-        throw new Error('No response body');
-      }
+      if (!response.body) throw new Error('No response body');
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -725,64 +534,36 @@ export default function ReaderPage() {
               const parsed = JSON.parse(data);
               if (parsed.content) {
                 accumulatedContent += parsed.content;
-                // 实时更新消息内容
                 setMessages(prev => prev.map(msg =>
                   msg.id === assistantMessageId
-                    ? {
-                        ...msg,
-                        blocks: [{
-                          ...msg.blocks[0],
-                          content: accumulatedContent,
-                        }],
-                      }
+                    ? { ...msg, blocks: [{ ...msg.blocks[0], content: accumulatedContent }] }
                     : msg
                 ));
               }
-              if (parsed.error) {
-                throw new Error(parsed.error);
-              }
-            } catch (e) {
-              // 忽略解析错误
-            }
+            } catch (e) { /* ignore */ }
           }
         }
       }
 
-      // 最终保存会话
+      // Update session with final messages
       const finalMessages = newMessages.map(msg =>
         msg.id === assistantMessageId
-          ? {
-              ...msg,
-              blocks: [{
-                ...msg.blocks[0],
-                content: accumulatedContent,
-              }],
-            }
+          ? { ...msg, blocks: [{ ...msg.blocks[0], content: accumulatedContent }] }
           : msg
       );
 
-      // Update session with final messages
       if (sessionId) {
         setSessions(prev => prev.map(s =>
-          s.id === sessionId
-            ? { ...s, messages: finalMessages, timestamp: Date.now() }
-            : s
+          s.id === sessionId ? { ...s, messages: finalMessages, timestamp: Date.now() } : s
         ));
+        await saveCurrentSession(finalMessages);
       }
-
-      // Save current session with the new messages
-      await saveCurrentSession(finalMessages);
     } catch (err) {
       console.error('Error calling LLM:', err);
-      const errorData = err instanceof Error ? err.message : String(err);
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        blocks: [{
-          id: (Date.now() + 1).toString(),
-          content: `抱歉，调用 AI 服务失败：${errorData}`,
-          timestamp: Date.now(),
-        }],
+        blocks: [{ id: (Date.now() + 1).toString(), content: `抱歉，调用 AI 服务失败：${err}`, timestamp: Date.now() }],
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, errorMessage]);
@@ -791,44 +572,183 @@ export default function ReaderPage() {
     }
   };
 
-  // Handle copy to clipboard
-  const handleCopyToClipboard = async () => {
-    if (contextMenuSelection) {
+  // ==================== Session Management ====================
+
+  const createNewSession = useCallback(() => {
+    clearHighlights();
+    const newSessionId = Date.now().toString();
+    setCurrentSessionId(newSessionId);
+    setMessages([]);
+    setSelectedBlocks([]);
+    const newSession: Session = {
+      id: newSessionId,
+      title: `对话 ${sessions.length + 1}`,
+      selectedBlocks: [],
+      messages: [],
+      timestamp: Date.now(),
+    };
+    setSessions(prev => [...prev, newSession]);
+  }, [sessions.length]);
+
+  const switchToSession = useCallback((sessionId: string) => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (session) {
+      setCurrentSessionId(sessionId);
+      setMessages(session.messages || []);
+      setSelectedBlocks(session.selectedBlocks || []);
+      refreshHighlights(session.selectedBlocks || []);
+    }
+  }, [sessions]);
+
+  const deleteSession = useCallback(async (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newSessions = sessions.filter(s => s.id !== sessionId);
+    setSessions(newSessions);
+
+    if (currentChapter && bookId) {
+      const htmlFile = currentChapter.split('#')[0];
+      const encodedHtmlFile = encodeURIComponent(htmlFile);
       try {
-        await navigator.clipboard.writeText(contextMenuSelection);
-        setShowContextMenu(false);
-      } catch (err) {
-        console.error('Failed to copy:', err);
+        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        });
+      } catch (err) { /* ignore */ }
+    }
+
+    if (currentSessionId === sessionId) {
+      if (newSessions.length > 0) {
+        switchToSession(newSessions[newSessions.length - 1].id);
+      } else {
+        setCurrentSessionId(null);
+        setMessages([]);
+        setSelectedBlocks([]);
+        clearHighlights();
       }
     }
-  };
+  }, [sessions, currentSessionId, currentChapter, bookId, switchToSession]);
 
+  const handleEditSession = useCallback((sessionId: string) => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (session) {
+      setEditingSessionId(sessionId);
+      setEditingSessionTitle(session.title);
+      setShowEditSession(true);
+    }
+  }, [sessions]);
 
-  // Load notes from local JSON file for the current chapter
-  const loadNotesForChapter = useCallback(async (chapterHref: string) => {
-    if (!chapterHref || !bookId) return;
+  const handleSaveSessionTitle = useCallback(async () => {
+    if (!editingSessionId || !editingSessionTitle.trim()) return;
 
-    try {
-      // Extract HTML filename from chapter href
-      const htmlFile = chapterHref.split('#')[0];
-      // Encode the htmlFile for URL
+    setSessions(prev => prev.map(s =>
+      s.id === editingSessionId ? { ...s, title: editingSessionTitle.trim() } : s
+    ));
+
+    const session = sessions.find(s => s.id === editingSessionId);
+    if (session && currentChapter && bookId) {
+      const htmlFile = currentChapter.split('#')[0];
       const encodedHtmlFile = encodeURIComponent(htmlFile);
+      try {
+        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: editingSessionId,
+            selectedBlocks: session.selectedBlocks,
+            messages: session.messages,
+            title: editingSessionTitle.trim(),
+          }),
+        });
+      } catch (err) { /* ignore */ }
+    }
 
+    setShowEditSession(false);
+    setEditingSessionId(null);
+    setEditingSessionTitle('');
+  }, [editingSessionId, editingSessionTitle, sessions, currentChapter, bookId]);
+
+  // ==================== Highlights ====================
+
+  const clearHighlights = useCallback(() => {
+    if (!rendition) return;
+    highlightRefs.current.forEach((cfiRange) => {
+      try { rendition.annotations.remove(cfiRange, 'highlight'); } catch (e) { /* ignore */ }
+    });
+    highlightRefs.current.clear();
+  }, [rendition]);
+
+  const highlightBlock = useCallback((block: Block) => {
+    if (!rendition || !block.cfiRange) return;
+    if (highlightRefs.current.has(block.id)) {
+      try { rendition.annotations.remove(block.cfiRange, 'highlight'); } catch (e) { /* ignore */ }
+    }
+    try {
+      rendition.annotations.highlight(block.cfiRange, {}, () => {});
+      highlightRefs.current.set(block.id, block.cfiRange);
+    } catch (e) { /* ignore */ }
+  }, [rendition]);
+
+  const refreshHighlights = useCallback((blocks: Block[]) => {
+    clearHighlights();
+    blocks.forEach(block => highlightBlock(block));
+  }, [clearHighlights, highlightBlock]);
+
+  // ==================== Blocks ====================
+
+  const handleRemoveBlock = useCallback(async (id: string) => {
+    const removedBlock = selectedBlocks.find(b => b.id === id);
+    if (removedBlock?.cfiRange && rendition) {
+      try {
+        rendition.annotations.remove(removedBlock.cfiRange, 'highlight');
+        highlightRefs.current.delete(id);
+      } catch (e) { /* ignore */ }
+    }
+
+    const newSelectedBlocks = selectedBlocks.filter(b => b.id !== id);
+    setSelectedBlocks(newSelectedBlocks);
+    setExpandedBlocks(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+
+    if (currentSessionId) {
+      setSessions(prev => prev.map(s =>
+        s.id === currentSessionId ? { ...s, selectedBlocks: newSelectedBlocks, timestamp: Date.now() } : s
+      ));
+      await saveCurrentSession(messages, newSelectedBlocks);
+    }
+  }, [selectedBlocks, rendition, currentSessionId, messages]);
+
+  const handleToggleExpandBlock = useCallback((id: string) => {
+    setExpandedBlocks(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // ==================== Notes and Comments ====================
+
+  const loadNotesForChapter = useCallback(async (href: string) => {
+    if (!href || !bookId) return;
+    try {
+      const htmlFile = href.split('#')[0];
+      const encodedHtmlFile = encodeURIComponent(htmlFile);
       const res = await fetch(`/api/note/${bookId}/${encodedHtmlFile}`);
       if (res.ok) {
         const data = await res.json();
-
-        // Load sessions
-        if (data.sessions && data.sessions.length > 0) {
-          const loadedSessions = data.sessions.map((session: any) => ({
-            id: session.id,
-            title: session.title || `对话 ${data.sessions.indexOf(session) + 1}`,
-            selectedBlocks: session.selectedBlocks || [],
-            messages: session.messages || [],
-            timestamp: session.timestamp,
+        if (data.sessions?.length > 0) {
+          const loadedSessions = data.sessions.map((s: any) => ({
+            id: s.id,
+            title: s.title || `对话 ${data.sessions.indexOf(s) + 1}`,
+            selectedBlocks: s.selectedBlocks || [],
+            messages: s.messages || [],
+            timestamp: s.timestamp,
           }));
           setSessions(loadedSessions);
-          // Select the most recent session
           const mostRecent = loadedSessions.sort((a: any, b: any) => b.timestamp - a.timestamp)[0];
           setCurrentSessionId(mostRecent.id);
           setMessages(mostRecent.messages || []);
@@ -843,238 +763,16 @@ export default function ReaderPage() {
     } catch (err) {
       console.error('Failed to load notes:', err);
       setSelectedBlocks([]);
-      setSessions([]);
     }
   }, [bookId]);
 
-  // Save current session
-  const saveCurrentSession = useCallback(async (messagesToSave?: Message[]) => {
-    if (!currentSessionId || !bookId || !currentChapter) return;
-
-    const messagesToUse = messagesToSave ?? messages;
-    const currentSession = sessions.find(s => s.id === currentSessionId);
-    const title = currentSession?.title || '';
-
-    try {
-      const htmlFile = currentChapter.split('#')[0];
-      const encodedHtmlFile = encodeURIComponent(htmlFile);
-
-      await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          sessionId: currentSessionId,
-          title,
-          selectedBlocks,
-          messages: messagesToUse,
-        }),
-      });
-    } catch (err) {
-      console.error('Failed to save session:', err);
-    }
-  }, [bookId, currentChapter, currentSessionId, selectedBlocks, messages, sessions]);
-
-  // Save session when selectedBlocks change
-  const prevSelectedBlocksRef = useRef<string>('');
-  useEffect(() => {
-    if (!currentSessionId || !bookId || !currentChapter) return;
-
-    const currentBlocksKey = JSON.stringify(selectedBlocks.map(b => ({ id: b.id, content: b.content })));
-    if (prevSelectedBlocksRef.current === '') {
-      prevSelectedBlocksRef.current = currentBlocksKey;
-      return;
-    }
-    if (prevSelectedBlocksRef.current === currentBlocksKey) return;
-
-    prevSelectedBlocksRef.current = currentBlocksKey;
-
-    // Debounce save
-    const timer = setTimeout(() => {
-      saveCurrentSession(messages);
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [currentSessionId, bookId, currentChapter, selectedBlocks, messages, saveCurrentSession]);
-
-  // Auto scroll to bottom when messages change
-  useEffect(() => {
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    }
-  }, [messages]);
-
-  // Create a new session
-  const createNewSession = useCallback(() => {
-    // 清除当前高亮
-    clearHighlights();
-
-    const newSessionId = Date.now().toString();
-    setCurrentSessionId(newSessionId);
-    setMessages([]);
-    setSelectedBlocks([]);
-    const newSession = {
-      id: newSessionId,
-      title: `对话 ${sessions.length + 1}`,
-      selectedBlocks: [],
-      messages: [],
-      timestamp: Date.now(),
-    };
-    setSessions(prev => [...prev, newSession]);
-  }, [selectedBlocks]);
-
-  // 高亮管理
-  const highlightRefs = useRef<Map<string, string>>(new Map());
-
-  // 清除所有高亮
-  const clearHighlights = useCallback(() => {
-    if (!rendition) return;
-    highlightRefs.current.forEach((cfiRange, blockId) => {
-      try {
-        rendition.annotations.remove(cfiRange, 'highlight');
-      } catch (e) {
-        console.warn('Failed to remove highlight:', e);
-      }
-    });
-    highlightRefs.current.clear();
-  }, [rendition]);
-
-  // 添加高亮
-  const highlightBlock = useCallback((block: Block) => {
-    if (!rendition || !block.cfiRange) return;
-
-    // 如果已经高亮过，先移除
-    if (highlightRefs.current.has(block.id)) {
-      try {
-        rendition.annotations.remove(block.cfiRange, 'highlight');
-      } catch (e) {
-        console.warn('Failed to remove old highlight:', e);
-      }
-    }
-
-    try {
-      const highlightId = rendition.annotations.highlight(
-        block.cfiRange,
-        {},
-        () => {}
-      );
-      highlightRefs.current.set(block.id, block.cfiRange);
-    } catch (e) {
-      console.warn('Failed to highlight block:', e);
-    }
-  }, [rendition]);
-
-  // 刷新当前 session 的高亮
-  const refreshHighlights = useCallback((blocks: Block[]) => {
-    clearHighlights();
-    blocks.forEach(block => highlightBlock(block));
-  }, [clearHighlights, highlightBlock]);
-
-  // Switch to an existing session
-  const switchToSession = useCallback((sessionId: string) => {
-    const session = sessions.find(s => s.id === sessionId);
-    if (session) {
-      setCurrentSessionId(sessionId);
-      setMessages(session.messages || []);
-      setSelectedBlocks(session.selectedBlocks || []);
-      // 刷新高亮
-      refreshHighlights(session.selectedBlocks || []);
-    }
-  }, [sessions, refreshHighlights]);
-
-  // Edit session title
-  const handleEditSession = useCallback((sessionId: string) => {
-    const session = sessions.find(s => s.id === sessionId);
-    if (session) {
-      setEditingSessionId(sessionId);
-      setEditingSessionTitle(session.title);
-      setShowEditSession(true);
-    }
-  }, [sessions]);
-
-  const handleSaveSessionTitle = useCallback(async () => {
-    if (!editingSessionId || !editingSessionTitle.trim()) return;
-
-    // Update local state
-    setSessions(prev => prev.map(s =>
-      s.id === editingSessionId
-        ? { ...s, title: editingSessionTitle.trim() }
-        : s
-    ));
-
-    // Save to server
-    const session = sessions.find(s => s.id === editingSessionId);
-    if (session && currentSessionId && currentChapter && bookId) {
-      try {
-        const htmlFile = currentChapter.split('#')[0];
-        const encodedHtmlFile = encodeURIComponent(htmlFile);
-        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId: editingSessionId,
-            selectedBlocks: session.selectedBlocks,
-            messages: session.messages,
-            title: editingSessionTitle.trim(),
-          }),
-        });
-      } catch (err) {
-        console.error('Failed to save session title:', err);
-      }
-    }
-
-    setShowEditSession(false);
-    setEditingSessionId(null);
-    setEditingSessionTitle('');
-  }, [editingSessionId, editingSessionTitle, sessions, currentSessionId, currentChapter, bookId]);
-
-  // Delete a session
-  const deleteSession = useCallback(async (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-
-    const newSessions = sessions.filter(s => s.id !== sessionId);
-    setSessions(newSessions);
-
-    // 调用 API 删除服务器上的 session
-    if (currentChapter && bookId) {
-      const htmlFile = currentChapter.split('#')[0];
-      const encodedHtmlFile = encodeURIComponent(htmlFile);
-      try {
-        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId }),
-        });
-      } catch (err) {
-        console.error('Failed to delete session from server:', err);
-      }
-    }
-
-    // If deleting current session, switch to another or clear
-    if (currentSessionId === sessionId) {
-      if (newSessions.length > 0) {
-        switchToSession(newSessions[newSessions.length - 1].id);
-      } else {
-        // 删除所有 session 时，清空选中文字和高亮
-        setCurrentSessionId(null);
-        setMessages([]);
-        setSelectedBlocks([]);
-        clearHighlights();
-      }
-    }
-  }, [sessions, currentSessionId, switchToSession, clearHighlights, currentChapter, bookId]);
-
-  // Load comments for current chapter
   const loadCommentsForChapter = useCallback(async (href: string) => {
     try {
       const htmlFile = href.split('#')[0];
       const encodedHtmlFile = encodeURIComponent(htmlFile);
-
       const res = await fetch(`/api/note/${bookId}/${encodedHtmlFile}`);
       const data = await res.json();
 
-      // Filter comments for current chapter only
       const currentChapterFile = htmlFile.split('/').pop() || htmlFile;
       const filteredComments = (data.comments || []).filter((comment: any) => {
         const commentChapter = comment.chapter || '';
@@ -1083,105 +781,54 @@ export default function ReaderPage() {
                currentChapterFile.replace(/\.[^/.]+$/, '') === commentChapterFile.replace(/\.[^/.]+$/, '');
       });
 
-      if (filteredComments.length > 0) {
-        setComments(filteredComments);
-      } else {
-        setComments([]);
-      }
+      setComments(filteredComments.length > 0 ? filteredComments : []);
     } catch (err) {
       console.error('Failed to load comments:', err);
       setComments([]);
     }
   }, [bookId]);
 
-  // Create rendition instance
-  const createRenditionInstance = useCallback(() => {
-    if (!viewerRef.current || !book) return null;
-    return book.renderTo(viewerRef.current, {
-      width: '100%',
-      height: '100%',
-      spread: 'none',
-      flow: 'scrolled' as any,
-    });
-  }, [book]);
+  const saveCurrentSession = useCallback(async (msgs?: Message[], blocks?: Block[]) => {
+    if (!currentSessionId || !bookId || !currentChapter) return;
+    const messagesToUse = msgs ?? messages;
+    const blocksToUse = blocks ?? selectedBlocks;
+    const currentSession = sessions.find(s => s.id === currentSessionId);
+    const title = currentSession?.title || '';
 
-  // Setup rendition themes and event listeners
-  const setupRenditionEvents = useCallback((renditionInstance: any, options: { initialChapter?: string } = {}) => {
-    // Apply theme settings
-    renditionInstance.themes.fontSize(`${fontSize}px`);
-    renditionInstance.themes.font(fontFamily);
-    renditionInstance.themes.override("color", '#3a3a3a', true);
-    renditionInstance.themes.override("line-height", lineHeight.toString(), true);
-
-    // Handle location changes
-    renditionInstance.on('relocated', (location: { start: { href: string; cfi: string } }) => {
-      const href = location.start.href;
-      setCurrentChapter(href);
-      // Sync selectedChapter for TOC active state
-      setSelectedChapter(href);
-
-      // Save CFI for bookmark
-      const cfi = location.start.cfi;
-      currentCfiRef.current = cfi;
-
-      // Save progress with debounce (chapter info is in index.json)
-      const htmlFile = href.split('#')[0];
-
-      if (saveProgressTimeoutRef.current) {
-        clearTimeout(saveProgressTimeoutRef.current);
-      }
-      saveProgressTimeoutRef.current = setTimeout(() => {
-        saveProgress(htmlFile, cfi);
-      }, 2000);
-    });
-
-    // Handle rendered event - bind iframe events
-    if (!selectionHandlerAdded.current) {
-      selectionHandlerAdded.current = true;
-      renditionInstance.on('rendered', () => {
-        const tryBind = (attempts: number) => {
-          if (attempts <= 0) return;
-          const container = viewerRef.current;
-          const iframe = container?.querySelector('iframe');
-
-          if (iframe && iframe.contentWindow) {
-            const win = iframe.contentWindow;
-
-            // Data loading is handled by useEffect when currentChapter changes
-
-            // Handle right-click context menu
-            win.addEventListener('contextmenu', (e: MouseEvent) => {
-              e.preventDefault();
-              setTimeout(() => {
-                const selection = win.getSelection();
-                const selectedText = selection ? selection.toString().trim() : '';
-
-                if (selectedText && selection && selection.rangeCount > 0) {
-                  const iframeRect = iframe.getBoundingClientRect();
-                  setContextMenuPosition({
-                    x: iframeRect.left + e.clientX,
-                    y: iframeRect.top + e.clientY
-                  });
-                  setContextMenuSelection(selectedText);
-                  setShowContextMenu(true);
-                }
-              }, 10);
-            });
-
-            // Listen to epubjs selected event for CFI
-            renditionInstance.on('selected', (cfiRange: string) => {
-              setContextMenuCfiRange(cfiRange);
-            });
-          } else {
-            setTimeout(() => tryBind(attempts - 1), 500);
-          }
-        };
-        tryBind(5);
+    try {
+      const htmlFile = currentChapter.split('#')[0];
+      const encodedHtmlFile = encodeURIComponent(htmlFile);
+      await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: currentSessionId,
+          title,
+          selectedBlocks: blocksToUse,
+          messages: messagesToUse,
+        }),
       });
+    } catch (err) {
+      console.error('Failed to save session:', err);
     }
-  }, [fontSize, fontFamily, lineHeight, saveProgress, loadNotesForChapter, loadCommentsForChapter, selectedChapter, currentChapter]);
+  }, [bookId, currentChapter, currentSessionId, messages, selectedBlocks, sessions]);
 
-  // Load notes and comments when currentChapter changes
+  // Auto-save selectedBlocks changes
+  useEffect(() => {
+    if (!currentSessionId || !bookId || !currentChapter) return;
+    const currentBlocksKey = JSON.stringify(selectedBlocks.map(b => ({ id: b.id, content: b.content })));
+    if (prevSelectedBlocksRef.current === '') {
+      prevSelectedBlocksRef.current = currentBlocksKey;
+      return;
+    }
+    if (prevSelectedBlocksRef.current === currentBlocksKey) return;
+    prevSelectedBlocksRef.current = currentBlocksKey;
+
+    const timer = setTimeout(() => saveCurrentSession(messages, selectedBlocks), 500);
+    return () => clearTimeout(timer);
+  }, [currentSessionId, bookId, currentChapter, selectedBlocks, messages, saveCurrentSession]);
+
+  // Load notes/comments when chapter changes
   useEffect(() => {
     if (currentChapter && isContentReady) {
       loadNotesForChapter(currentChapter);
@@ -1189,129 +836,106 @@ export default function ReaderPage() {
     }
   }, [currentChapter, isContentReady, loadNotesForChapter, loadCommentsForChapter]);
 
-  // Sync selectedChapter with currentChapter for TOC active state
+  // Render comments as underlines
   useEffect(() => {
-    if (currentChapter) {
-      setSelectedChapter(currentChapter);
-    }
-  }, [currentChapter]);
-
-  // 当 isContentReady 变为 true 时，加载当前 session 的高亮
-  useEffect(() => {
-    if (isContentReady && selectedBlocks.length > 0) {
-      refreshHighlights(selectedBlocks);
-    }
-  }, [isContentReady]);
-
-  // Handle add to AI assistant
-  const handleAddToAssistant = async () => {
-    if (contextMenuSelection && rendition) {
-      const blockId = Date.now().toString();
-
-      const newBlock: Block = {
-        id: blockId,
-        content: contextMenuSelection,
-        timestamp: Date.now(),
-        cfiRange: contextMenuCfiRange,
-      };
-
-      const newSelectedBlocks = [...selectedBlocks, newBlock];
-      setSelectedBlocks(newSelectedBlocks);
-      highlightBlock(newBlock);
-      setShowContextMenu(false);
-
-      // Create session if doesn't exist
-      let sessionId = currentSessionId;
-      if (!sessionId) {
-        sessionId = Date.now().toString();
-        setCurrentSessionId(sessionId);
-        const newSession = {
-          id: sessionId,
-          title: `对话 ${sessions.length + 1}`,
-          selectedBlocks: newSelectedBlocks,
-          messages: [],
-          timestamp: Date.now(),
-        };
-        setSessions(prev => [...prev, newSession]);
+    if (!rendition || comments.length === 0) return;
+    comments.forEach(comment => {
+      if (comment.cfiRange && !commentRefs.current.has(comment.id)) {
+        try {
+          rendition.annotations.underline(comment.cfiRange);
+          commentRefs.current.set(comment.id, comment.cfiRange);
+        } catch (e) { /* ignore */ }
       }
+    });
+  }, [rendition, comments]);
 
-      // Save to local JSON file via API
+  // ==================== Context Menu ====================
+
+  const handleCopyToClipboard = async () => {
+    if (contextMenuSelection) {
       try {
-        const htmlFile = currentChapter.split('#')[0];
-        const encodedHtmlFile = encodeURIComponent(htmlFile);
+        await navigator.clipboard.writeText(contextMenuSelection);
+        setShowContextMenu(false);
+      } catch (err) { /* ignore */ }
+    }
+  };
 
+  const handleAddToAssistant = async () => {
+    if (!contextMenuSelection || !rendition) return;
+    const blockId = Date.now().toString();
+    const newBlock: Block = {
+      id: blockId,
+      content: contextMenuSelection,
+      timestamp: Date.now(),
+      cfiRange: contextMenuCfiRange,
+    };
+
+    const newSelectedBlocks = [...selectedBlocks, newBlock];
+    setSelectedBlocks(newSelectedBlocks);
+    highlightBlock(newBlock);
+    setShowContextMenu(false);
+
+    let sessionId = currentSessionId;
+    if (!sessionId) {
+      sessionId = Date.now().toString();
+      setCurrentSessionId(sessionId);
+      const newSession: Session = {
+        id: sessionId,
+        title: `对话 ${sessions.length + 1}`,
+        selectedBlocks: newSelectedBlocks,
+        messages: [],
+        timestamp: Date.now(),
+      };
+      setSessions(prev => [...prev, newSession]);
+    }
+
+    if (currentChapter && bookId) {
+      const htmlFile = currentChapter.split('#')[0];
+      const encodedHtmlFile = encodeURIComponent(htmlFile);
+      try {
         await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             sessionId: currentSessionId || sessionId,
             selectedBlocks: newSelectedBlocks,
             messages,
           }),
         });
-      } catch (err) {
-        console.error('Failed to save note:', err);
-      }
+      } catch (err) { /* ignore */ }
     }
   };
 
-  // Handle add to AI assistant with new conversation
   const handleAddToAssistantNewChat = async () => {
-    if (contextMenuSelection && rendition) {
-      const blockId = Date.now().toString();
+    if (!contextMenuSelection || !rendition) return;
+    const blockId = Date.now().toString();
+    const newBlock: Block = {
+      id: blockId,
+      content: contextMenuSelection,
+      timestamp: Date.now(),
+      cfiRange: contextMenuCfiRange,
+    };
 
-      const newBlock: Block = {
-        id: blockId,
-        content: contextMenuSelection,
-        timestamp: Date.now(),
-        cfiRange: contextMenuCfiRange,
-      };
+    const newSessionId = Date.now().toString();
+    const newSelectedBlocks = [newBlock];
 
-      // Always create a new session
-      const newSessionId = Date.now().toString();
-      const newSelectedBlocks = [newBlock];
+    setCurrentSessionId(newSessionId);
+    setMessages([]);
+    setSelectedBlocks(newSelectedBlocks);
+    highlightBlock(newBlock);
 
-      setCurrentSessionId(newSessionId);
-      setMessages([]);
-      setSelectedBlocks(newSelectedBlocks);
-      highlightBlock(newBlock);
+    const newSession: Session = {
+      id: newSessionId,
+      title: `对话 ${sessions.length + 1}`,
+      selectedBlocks: newSelectedBlocks,
+      messages: [],
+      timestamp: Date.now(),
+    };
 
-      const newSession = {
-        id: newSessionId,
-        title: `对话 ${sessions.length + 1}`,
-        selectedBlocks: newSelectedBlocks,
-        messages: [],
-        timestamp: Date.now(),
-      };
-
-      setSessions(prev => [...prev, newSession]);
-      setShowContextMenu(false);
-
-      // Save to local JSON file via API
-      try {
-        const htmlFile = currentChapter.split('#')[0];
-        const encodedHtmlFile = encodeURIComponent(htmlFile);
-
-        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            sessionId: newSessionId,
-            selectedBlocks: newSelectedBlocks,
-            messages: [],
-          }),
-        });
-      } catch (err) {
-        console.error('Failed to save note:', err);
-      }
-    }
+    setSessions(prev => [...prev, newSession]);
+    setShowContextMenu(false);
   };
 
-  // Handle add comment - opens comment tab with selection
   const handleAddComment = () => {
     if (contextMenuSelection) {
       setCommentSelection(contextMenuSelection);
@@ -1322,7 +946,6 @@ export default function ReaderPage() {
     }
   };
 
-  // Save comment with underline annotation
   const handleSaveComment = async () => {
     if (!currentCommentText.trim() || !commentSelection) return;
 
@@ -1338,220 +961,80 @@ export default function ReaderPage() {
     const updatedComments = [...comments, newComment];
     setComments(updatedComments);
 
-    // Add underline annotation
     if (rendition && commentCfiRange) {
       try {
         rendition.annotations.underline(commentCfiRange);
-        // Use cfiRange as the reference since we can't get annotation ID
         commentRefs.current.set(newComment.id, commentCfiRange);
-      } catch (e) {
-        console.warn('Failed to add underline:', e);
-      }
+      } catch (e) { /* ignore */ }
     }
 
-    // Clear input
     setCurrentCommentText('');
     setCommentSelection('');
     setCommentCfiRange('');
 
-    // Save comments to API
-    try {
+    if (currentChapter && bookId) {
       const htmlFile = currentChapter.split('#')[0];
       const encodedHtmlFile = encodeURIComponent(htmlFile);
-
-      await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          comments: updatedComments,
-        }),
-      });
-    } catch (err) {
-      console.error('Failed to save comment:', err);
+      try {
+        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ comments: updatedComments }),
+        });
+      } catch (err) { /* ignore */ }
     }
   };
 
-  // Delete comment
   const handleDeleteComment = async (commentId: string) => {
     const comment = comments.find(c => c.id === commentId);
     if (!comment) return;
 
-    // Remove underline annotation
     if (rendition && commentRefs.current.has(commentId)) {
       try {
         rendition.annotations.remove(commentRefs.current.get(commentId)!, 'underline');
         commentRefs.current.delete(commentId);
-      } catch (e) {
-        console.warn('Failed to remove underline:', e);
-      }
+      } catch (e) { /* ignore */ }
     }
 
     const updatedComments = comments.filter(c => c.id !== commentId);
     setComments(updatedComments);
 
-    // Save to API
-    try {
+    if (currentChapter && bookId) {
       const htmlFile = currentChapter.split('#')[0];
       const encodedHtmlFile = encodeURIComponent(htmlFile);
-
-      await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          comments: updatedComments,
-        }),
-      });
-    } catch (err) {
-      console.error('Failed to delete comment:', err);
-    }
-  };
-
-  // Render comments as underlines when loaded
-  useEffect(() => {
-    if (!rendition || comments.length === 0) return;
-
-    comments.forEach(comment => {
-      if (comment.cfiRange && !commentRefs.current.has(comment.id)) {
-        try {
-          rendition.annotations.underline(comment.cfiRange);
-          commentRefs.current.set(comment.id, comment.cfiRange);
-        } catch (e) {
-          console.warn('Failed to add underline for comment:', e);
-        }
-      }
-    });
-  }, [rendition, comments]);
-
-  // Handle remove block
-  const handleRemoveBlock = async (id: string) => {
-    // 找到要删除的 block 并清除高亮
-    const removedBlock = selectedBlocks.find(b => b.id === id);
-    if (removedBlock && removedBlock.cfiRange && rendition) {
       try {
-        rendition.annotations.remove(removedBlock.cfiRange, 'highlight');
-        highlightRefs.current.delete(id);
-      } catch (e) {
-        console.warn('Failed to remove highlight:', e);
-      }
-    }
-
-    // Remove from local state
-    const newSelectedBlocks = selectedBlocks.filter(b => b.id !== id);
-    setSelectedBlocks(newSelectedBlocks);
-    setExpandedBlocks(prev => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-
-    // Update current session's selectedBlocks
-    if (currentSessionId) {
-      setSessions(prev => prev.map(s =>
-        s.id === currentSessionId
-          ? { ...s, selectedBlocks: newSelectedBlocks, timestamp: Date.now() }
-          : s
-      ));
-      // Save to JSON file
-      try {
-        const htmlFile = currentChapter.split('#')[0];
-        const encodedHtmlFile = encodeURIComponent(htmlFile);
         await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            sessionId: currentSessionId,
-            selectedBlocks: newSelectedBlocks,
-            messages,
-          }),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ comments: updatedComments }),
         });
-      } catch (err) {
-        console.error('Failed to save after removing block:', err);
-      }
+      } catch (err) { /* ignore */ }
     }
-
-    // Hide context menu after removing block
-    setShowContextMenu(false);
-    setContextMenuSelection('');
   };
 
-  // Handle toggle block expand/collapse
-  const handleToggleExpand = (id: string) => {
-    setExpandedBlocks(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  // Hide context menu when clicking outside
-  const handleClickOutside = useCallback(() => {
-    setShowContextMenu(false);
-    setContextMenuSelection('');
-  }, []);
-
+  // Hide context menu on click outside
   useEffect(() => {
+    const handleClickOutside = () => {
+      setShowContextMenu(false);
+      setContextMenuSelection('');
+    };
+
     if (showContextMenu) {
       const handleDocumentMouseDown = (e: MouseEvent) => {
-        // Don't hide if clicking on the context menu itself
         const target = e.target as HTMLElement;
-        if (target.closest('.fixed.z-50')) {
-          return;
-        }
+        if (target.closest('.fixed.z-50')) return;
         handleClickOutside();
       };
-
       document.addEventListener('mousedown', handleDocumentMouseDown);
-      return () => {
-        document.removeEventListener('mousedown', handleDocumentMouseDown);
-      };
+      return () => document.removeEventListener('mousedown', handleDocumentMouseDown);
     }
-  }, [showContextMenu, handleClickOutside]);
+  }, [showContextMenu]);
 
-  if (loading) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-          <div className="text-lg text-slate-600">正在加载书籍...</div>
-        </div>
-      </div>
-    );
-  }
+  // ==================== Helper Functions ====================
 
-  if (error) {
-    return (
-      <div className="h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
-        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-          <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-        </div>
-        <div className="text-xl text-red-600 mb-4">{error}</div>
-        <Link href="/" className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
-          返回首页
-        </Link>
-      </div>
-    );
-  }
-
-  // Helper to find chapter in tree by HTML file
-  const findChapterInTree = (tree: TreeNode[], htmlFile: string): TreeNode | null => {
+  const findChapterInTree = (tree: any[], htmlFile: string): any => {
     for (const node of tree) {
-      // Check if htmlFile is in this node's contents
-      if (node.contents.some(c => c.includes(htmlFile) || htmlFile.includes(c))) {
-        return node;
-      }
-      // Check children
+      if (node.contents.some((c: string) => c.includes(htmlFile) || htmlFile.includes(c))) return node;
       if (node.children.length > 0) {
         const found = findChapterInTree(node.children, htmlFile);
         if (found) return found;
@@ -1560,888 +1043,215 @@ export default function ReaderPage() {
     return null;
   };
 
-  // Helper to get chapter info from index based on current chapter
   const getChapterInfo = (href: string) => {
     const htmlFileName = href.split('#')[0].split('/').pop() || '';
-    // Try to find in tree
     const found = findChapterInTree(chapterIndex.tree, htmlFileName);
-    if (found) {
-      return { chapterTitle: found.chapter_name, chapterHref: found.contents[0] || href };
-    }
-    // Fallback to chapters list
+    if (found) return { chapterTitle: found.chapter_name, chapterHref: found.contents[0] || href };
     const matched = chapters.find(c => c.href.includes(htmlFileName) || htmlFileName.includes(c.href.split('#')[0].split('/').pop() || ''));
-    if (matched) {
-      return { chapterTitle: matched.label, chapterHref: matched.href };
-    }
+    if (matched) return { chapterTitle: matched.label, chapterHref: matched.href };
     return null;
   };
 
-  // Toggle node expansion
-  const toggleNode = (chapterId: string) => {
-    setExpandedNodes(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(chapterId)) {
-        newSet.delete(chapterId);
-      } else {
-        newSet.add(chapterId);
-      }
-      return newSet;
-    });
-  };
-
-  // Recursive render function for tree chapters (VSCode Explorer style)
-  const renderTreeChapter = (tree: TreeNode[], activeHref: string, level: number = 0) => {
-    return tree.map((node) => {
-      const nodeHref = node.href || '';
-      // Check if current page is in this node's contents or href matches
-      const isActive = node.contents.some(c =>
-        activeHref.includes(c.split('#')[0].split('/').pop() || '') || c.includes(activeHref)
-      ) || nodeHref.includes(activeHref.split('#')[0].split('/').pop() || '') ||
-        activeHref.includes(nodeHref.split('#')[0].split('/').pop() || '');
-      const hasChildren = node.children && node.children.length > 0;
-      const isExpanded = expandedNodes.has(node.chapter_id);
-
-      return (
-        <li key={node.chapter_id}>
-          <div className="flex items-center">
-            {/* Expand/collapse chevron */}
-            {hasChildren ? (
-              <button
-                onClick={() => toggleNode(node.chapter_id)}
-                className="p-1 hover:bg-slate-200 rounded transition-colors"
-                style={{ marginLeft: `${level * 16}px` }}
-              >
-                <svg
-                  className={`w-3 h-3 text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                </svg>
-              </button>
-            ) : (
-              <span style={{ width: '20px', marginLeft: `${level * 16 + 4}px` }} />
-            )}
-
-            {/* Chapter icon */}
-            <button
-              onClick={() => node.href && handleChapterClick(node.href)}
-              className={`flex-1 text-left px-2 py-1.5 text-sm truncate transition-colors ${
-                isActive
-                  ? 'bg-indigo-100 text-indigo-700 font-medium'
-                  : 'text-slate-700 hover:bg-slate-100'
-              }`}
-            >
-              {/* File/folder icon */}
-              {hasChildren ? (
-                <svg className="w-4 h-4 inline-block mr-1.5 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4 inline-block mr-1.5 text-slate-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-                </svg>
-              )}
-              {node.chapter_name}
-            </button>
-          </div>
-
-          {/* Children */}
-          {hasChildren && isExpanded && (
-            <ul className="ml-0">
-              {renderTreeChapter(node.children, activeHref, level + 1)}
-            </ul>
-          )}
-        </li>
-      );
-    });
-  };
-
-  // Get current chapter info
-  const currentChapterInfo = getChapterInfo(selectedChapter || currentChapter);
+  const currentChapterInfo = getChapterInfo(currentChapter);
   const currentChapterTitle = currentChapterInfo?.chapterTitle || '';
 
-  // Get saved chapter info for initial load
-  const getSavedChapterInfo = () => {
-    if (savedHtmlFile) {
-      const found = findChapterInTree(chapterIndex.tree, savedHtmlFile);
-      if (found) {
-        return { chapterHref: found.contents[0] || '' };
-      }
-    }
-    return null;
-  };
-  const savedChapterInfo = getSavedChapterInfo();
+  // ==================== Render ====================
+
+  if (loading) return <LoadingState />;
+  if (error) return <ErrorState message={error} />;
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 to-slate-100">
-      {/* Header */}
-      <header className="h-14 bg-white/80 backdrop-blur-sm border-b border-slate-200 flex items-center px-4 justify-between shrink-0 shadow-sm">
-        <div className="flex items-center gap-4">
-          <Link
-            href="/"
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            <span className="text-sm font-medium">返回</span>
-          </Link>
-          <div className="h-6 w-px bg-slate-200"></div>
-          <h1 className="text-base font-semibold text-slate-800 truncate max-w-xs lg:max-w-md">
-            {bookTitle}
-          </h1>
-        </div>
+      <ReaderHeader
+        bookTitle={bookTitle}
+        fontSize={fontSize}
+        fontFamily={fontFamily}
+        lineHeight={lineHeight}
+        showToc={showToc}
+        onFontSizeChange={(size) => setFontSize(Math.min(32, Math.max(14, size)))}
+        onFontFamilyChange={setFontFamily}
+        onLineHeightChange={setLineHeight}
+        onToggleToc={() => setShowToc(!showToc)}
+      />
 
-        <div className="flex items-center gap-3">
-          {/* Font settings */}
-          <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1">
-            {/* Font size controls */}
-            <button
-              onClick={() => handleFontSizeChange(fontSize - 2)}
-              className="w-8 h-8 flex items-center justify-center rounded text-slate-600 hover:bg-white hover:shadow-sm transition-all"
-              title="减小字体"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-              </svg>
-            </button>
-            <span className="text-sm text-slate-600 w-8 text-center">{fontSize}</span>
-            <button
-              onClick={() => handleFontSizeChange(fontSize + 2)}
-              className="w-8 h-8 flex items-center justify-center rounded text-slate-600 hover:bg-white hover:shadow-sm transition-all"
-              title="增大字体"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-            </button>
-
-            {/* Divider */}
-            <div className="w-px h-6 bg-slate-300 mx-1"></div>
-
-            {/* Font family dropdown */}
-            <select
-              value={fontFamily}
-              onChange={(e) => {
-                setFontFamily(e.target.value);
-                localStorage.setItem('reader-font-family', e.target.value);
-              }}
-              className="h-8 px-2 text-sm bg-white border border-slate-200 rounded text-slate-600 cursor-pointer hover:border-slate-300 focus:outline-none focus:border-indigo-400"
-              title="字体"
-            >
-              {fontOptions.map((font) => (
-                <option key={font.value} value={font.value}>
-                  {font.label}
-                </option>
-              ))}
-            </select>
-
-            {/* Divider */}
-            <div className="w-px h-6 bg-slate-300 mx-1"></div>
-
-            {/* Line height controls */}
-            <button
-              onClick={() => {
-                const newHeight = Math.max(1.2, lineHeight - 0.2);
-                setLineHeight(newHeight);
-                localStorage.setItem('reader-line-height', newHeight.toString());
-              }}
-              className="w-8 h-8 flex items-center justify-center rounded text-slate-600 hover:bg-white hover:shadow-sm transition-all"
-              title="减小行距"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-              </svg>
-            </button>
-            <span className="text-sm text-slate-600 w-10 text-center">{lineHeight}</span>
-            <button
-              onClick={() => {
-                const newHeight = Math.min(3.0, lineHeight + 0.2);
-                setLineHeight(newHeight);
-                localStorage.setItem('reader-line-height', newHeight.toString());
-              }}
-              className="w-8 h-8 flex items-center justify-center rounded text-slate-600 hover:bg-white hover:shadow-sm transition-all"
-              title="增大行距"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Toggle TOC */}
-          <button
-            onClick={() => setShowToc(!showToc)}
-            className={`p-2 rounded-lg transition-colors ${
-              showToc ? 'bg-indigo-100 text-indigo-600' : 'text-slate-600 hover:bg-slate-100'
-            }`}
-            title="目录"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
-        </div>
-      </header>
-
-      {/* Main content */}
-      <div ref={containerRef} className="flex-1 flex overflow-hidden">
-        {/* Left sidebar - TOC */}
-        <aside
-          className={`bg-white border-r border-slate-200 overflow-y-auto shrink-0 transition-all duration-300 ${
-            showToc ? 'opacity-100' : 'w-0 opacity-0 overflow-hidden'
-          }`}
-          style={{ width: showToc ? tocWidth : 0 }}
-        >
-          <div className="p-3 border-b border-slate-100" style={{ width: tocWidth }}>
-            <div className="flex items-center gap-2">
-              <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-              </svg>
-              <h2 className="font-semibold text-slate-800">目录</h2>
-            </div>
-            <ul className="space-y-1 mt-4">
-              {/* Render tree structure */}
-              {chapterIndex.tree.length > 0 ? (
-                renderTreeChapter(chapterIndex.tree, selectedChapter || currentChapter || '')
-              ) : (
-                // Fallback to flat chapters list
-                chapters.map((chapter) => {
-                  const activeHref = (savedChapterInfo?.chapterHref) || selectedChapter || currentChapter;
-                  const isActive = activeHref.includes(chapter.href) || chapter.href.includes(activeHref);
-                  return (
-                    <li key={chapter.id}>
-                      <button
-                        onClick={() => handleChapterClick(chapter.href)}
-                        className={`w-full text-left px-3 py-2.5 rounded-lg text-sm truncate transition-colors ${
-                          isActive
-                            ? 'bg-indigo-50 text-indigo-700 font-medium'
-                            : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                        }`}
-                      >
-                        {chapter.label}
-                      </button>
-                    </li>
-                  );
-                })
-              )}
-            </ul>
-          </div>
-        </aside>
-
-        {/* Resize handle between TOC and content */}
+      <PanelGroup className="flex-1 flex overflow-hidden">
+        {/* TOC Sidebar */}
         {showToc && (
-          <div
-            className="w-1 bg-slate-200 hover:bg-indigo-400 cursor-col-resize transition-colors shrink-0"
-            onMouseDown={handleMouseDownLeft}
-          />
-        )}
-
-        {/* Main reader area */}
-        <main className="flex-1 flex flex-col bg-white overflow-hidden relative">
-          {/* Context menu for right-click */}
-          {showContextMenu && (
-            <div
-              className="fixed z-50 bg-white rounded-lg shadow-lg border border-slate-200 py-1 min-w-[140px]"
-              style={{
-                left: contextMenuPosition.x,
-                top: contextMenuPosition.y,
-              }}
-            >
-              <button
-                onClick={handleCopyToClipboard}
-                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                <span>复制</span>
-              </button>
-              <button
-                onClick={handleAddToAssistant}
-                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-indigo-600 hover:bg-indigo-50 transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-                <span>选中</span>
-              </button>
-              <button
-                onClick={handleAddToAssistantNewChat}
-                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-green-600 hover:bg-green-50 transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                <span>选中并创建新对话</span>
-              </button>
-              <button
-                onClick={handleAddComment}
-                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-amber-600 hover:bg-amber-50 transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                </svg>
-                <span>评论</span>
-              </button>
-            </div>
-          )}
-
-          {/* Current chapter indicator and navigation */}
-          {(currentChapterTitle || selectedChapter) && (
-            <div className="sticky top-0 bg-white/90 backdrop-blur-sm border-b border-slate-100 p-3 z-10 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                </svg>
-                <p className="text-sm text-slate-600 truncate">
-                  {currentChapterTitle || '加载中...'}
-                  {currentChapter && (
-                    <span className="text-xs text-slate-400 ml-1">
-                      ({currentChapter.split('#')[0].split('/').pop()})
-                    </span>
-                  )}
-                </p>
-              </div>
-              {selectedChapter && totalPages > 0 && (
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handlePrevPage}
-                    disabled={currentPage <= 1}
-                    className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    title="上一页"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                    </svg>
-                  </button>
-                  <span className="text-sm text-slate-500 min-w-[80px] text-center">
-                    {currentPage} / {totalPages}
-                  </span>
-                  <button
-                    onClick={handleNextPage}
-                    disabled={currentPage >= totalPages}
-                    className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    title="下一页"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-          {selectedChapter ? (
-            <div
-              ref={viewerRef}
-              className="flex-1 overflow-y-auto"
-              style={{ background: '#fff', color: '#4a4a4a' }}
-            />
-          ) : (
-            <div className="flex-1 flex items-center justify-center bg-slate-50">
-              <div className="text-center">
-                <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <svg className="w-8 h-8 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                  </svg>
-                </div>
-                <p className="text-slate-500 text-lg mb-2">请从左侧选择章节</p>
-                <p className="text-slate-400 text-sm">点击目录中的章节开始阅读</p>
-              </div>
-            </div>
-          )}
-        </main>
-
-        {/* Resize handle between content and chat */}
-        <div
-          className="w-1 bg-slate-200 hover:bg-indigo-400 cursor-col-resize transition-colors shrink-0"
-          onMouseDown={handleMouseDownRight}
-        />
-
-        {/* Right sidebar - AI Chat */}
-        <aside
-          className="bg-white border-l border-slate-200 flex flex-col shrink-0"
-          style={{ width: chatWidth }}
-        >
-          {/* Tab navigation */}
-          <div className="border-b border-slate-100 flex">
-            <button
-              onClick={() => setActiveTab('chat')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors ${
-                activeTab === 'chat'
-                  ? 'text-indigo-600 border-b-2 border-indigo-600'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-              AI 助手
-            </button>
-            <button
-              onClick={() => setActiveTab('comment')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors ${
-                activeTab === 'comment'
-                  ? 'text-amber-600 border-b-2 border-amber-600'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-              </svg>
-              评论 ({comments.length})
-            </button>
-          </div>
-
-          {/* Chat content - only show when on chat tab */}
-          {activeTab === 'chat' && (
-            <>
-              {/* Session tabs */}
-              {sessions.length > 0 && (
-            <div className="border-b border-slate-100 overflow-x-auto">
-              <div className="flex gap-1 px-2 py-2 min-w-max">
-                {sessions.slice().sort((a, b) => a.timestamp - b.timestamp).map((session) => (
-                  <div
-                    key={session.id}
-                    className={`flex items-center gap-1 pr-1 rounded-lg text-xs whitespace-nowrap transition-colors ${
-                      currentSessionId === session.id
-                        ? 'bg-indigo-100 text-indigo-700'
-                        : 'bg-slate-100 text-slate-600'
-                    }`}
-                  >
-                    <button
-                      onClick={() => switchToSession(session.id)}
-                      className="px-2 py-1.5 hover:opacity-70 transition-opacity"
-                    >
-                      {session.title}
-                    </button>
-                    <button
-                      onClick={() => handleEditSession(session.id)}
-                      className="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 transition-colors"
-                      title="重命名"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                    </button>
-                    <button
-                      onClick={(e) => deleteSession(session.id, e)}
-                      className="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                      title="删除对话"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Selected text blocks - always show title, content is collapsible */}
-          {selectedBlocks.length > 0 && (
-            <div className="border-b border-slate-100 bg-slate-50">
-              <button
-                onClick={() => setIsSelectedBlocksExpanded(!isSelectedBlocksExpanded)}
-                className="flex items-center justify-between w-full px-4 py-2"
-              >
-                <h3 className="text-sm font-medium text-slate-700">选中的文字 ({selectedBlocks.length})</h3>
-                <svg
-                  className={`w-4 h-4 text-slate-400 transition-transform ${isSelectedBlocksExpanded ? 'rotate-180' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              {isSelectedBlocksExpanded && (
-                <div className="px-4 pb-4 space-y-2 overflow-y-auto">
-                  {selectedBlocks.map((block) => {
-                    const isExpanded = expandedBlocks.has(block.id);
-                    const shouldTruncate = block.content.length > 200;
-                    const displayContent = !isExpanded && shouldTruncate
-                      ? block.content.slice(0, 200) + '...'
-                      : block.content;
-
-                    return (
-                      <div
-                        key={block.id}
-                        className="relative bg-white border border-slate-200 rounded-lg p-3 text-sm text-slate-700 hover:border-indigo-300 transition-colors"
-                      >
-                        <p className="whitespace-pre-wrap break-words">{displayContent}</p>
-                        <div className="absolute top-2 right-2 flex items-center gap-1">
-                          {shouldTruncate && (
-                            <button
-                              onClick={() => handleToggleExpand(block.id)}
-                              className="w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-indigo-500 hover:bg-indigo-50"
-                              title={isExpanded ? '收起' : '展开'}
-                            >
-                              <svg className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                              </svg>
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleRemoveBlock(block.id)}
-                            className="w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50"
-                            title="删除"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Messages */}
-          <div
-            ref={chatContainerRef}
-            className={`flex-1 overflow-y-auto p-4 space-y-4 ${selectedBlocks.length > 0 ? 'min-h-0' : ''}`}
-          >
-            {messages.length === 0 && selectedBlocks.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <div className="w-16 h-16 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-full flex items-center justify-center mb-4">
-                  <svg className="w-8 h-8 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                  </svg>
-                </div>
-                <p className="text-sm text-slate-500 mb-1">选择一段文字，</p>
-                <p className="text-sm text-slate-500">向 AI 提问关于内容的问题</p>
-              </div>
-            ) : (
-              messages.map((msg, index) => (
-                <div
-                  key={msg.id}
-                  className={`${msg.role === 'user' ? 'ml-8' : 'mr-8'}`}
-                >
-                  <div
-                    className={`px-4 py-3 rounded-2xl text-sm ${
-                      msg.role === 'user'
-                        ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-br-md'
-                        : 'bg-slate-100 text-slate-800 rounded-bl-md'
-                    }`}
-                  >
-                    {msg.role === 'assistant' ? (
-                      (() => {
-                        const content = msg.blocks.map(b => b.content).join('\n\n');
-                        const isStreaming = aiLoading && index === messages.length - 1;
-
-                        if (isStreaming && !content) {
-                          // Show loading indicator inside the streaming message
-                          return (
-                            <div className="flex items-center gap-2">
-                              <div className="flex gap-1">
-                                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                              </div>
-                            </div>
-                          );
-                        }
-
-                        return (
-                          <ReactMarkdown
-                            components={{
-                              p: ({ children }) => <p className="mb-2">{children}</p>,
-                              ul: ({ children }) => <ul className="list-disc ml-4 mb-2">{children}</ul>,
-                              ol: ({ children }) => <ol className="list-decimal ml-4 mb-2">{children}</ol>,
-                              li: ({ children }) => <li className="mb-1">{children}</li>,
-                              code: ({ className, children }) => {
-                                const isInline = !className;
-                                return isInline ? (
-                                  <code className="bg-slate-200 px-1 py-0.5 rounded text-xs">{children}</code>
-                                ) : (
-                                  <code className={`${className} block bg-slate-800 text-slate-100 p-2 rounded-lg overflow-x-auto mb-2 text-xs`}>
-                                    {children}
-                                  </code>
-                                );
-                              },
-                              pre: ({ children }) => <pre className="mb-2">{children}</pre>,
-                              h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
-                              h2: ({ children }) => <h2 className="text-base font-bold mb-1">{children}</h2>,
-                              h3: ({ children }) => <h3 className="text-sm font-bold mb-1">{children}</h3>,
-                              blockquote: ({ children }) => <blockquote className="border-l-2 border-slate-300 pl-2 italic mb-2">{children}</blockquote>,
-                            }}
-                          >
-                            {content}
-                          </ReactMarkdown>
-                        );
-                      })()
-                    ) : (
-                      // 如果是第一条用户消息，隐藏"选中文本："部分
-                      (() => {
-                        const isFirstUserMessage = index === 0 && msg.role === 'user';
-                        const content = msg.blocks.map(b => b.content).join('\n\n');
-                        if (isFirstUserMessage) {
-                          // 移除"选中文本："开头的部分
-                          return content.replace(/^选中文本：[\s\S]*?\n\n/, '');
-                        }
-                        return content;
-                      })()
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-            {/* Loading indicator is now integrated into streaming message - no separate loading shown */}
-          </div>
-
-          {/* Input area */}
-          <div className="p-4 border-t border-slate-100 bg-slate-50">
-            <div className="flex gap-2 items-end relative">
-              <button
-                onClick={createNewSession}
-                className="p-2.5 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition-colors shrink-0"
-                title="新建对话"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-              </button>
-              <textarea
-                ref={(el) => {
-                  if (el) {
-                    el.style.height = 'auto';
-                    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
-                  }
-                }}
-                value={input}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setInput(value);
-                  // 重置历史索引
-                  setHistoryIndex(-1);
-
-                  // 自动补全建议
-                  if (value.trim()) {
-                    const matched = inputHistory.filter(h => h.toLowerCase().includes(value.toLowerCase())).slice(0, 5);
-                    if (matched.length > 0) {
-                      setSuggestions(matched);
-                      setShowSuggestions(true);
-                      setSelectedSuggestionIndex(0);
-                    } else {
-                      setShowSuggestions(false);
-                    }
-                  } else {
-                    setShowSuggestions(false);
-                  }
-
-                  // Auto-resize
-                  setTimeout(() => {
-                    e.target.style.height = 'auto';
-                    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
-                  }, 0);
-                }}
-                onKeyDown={(e) => {
-                  // Tab 自动补全
-                  if (e.key === 'Tab') {
-                    if (showSuggestions && suggestions.length > 0) {
-                      e.preventDefault();
-                      const selected = suggestions[selectedSuggestionIndex >= 0 ? selectedSuggestionIndex : 0];
-                      if (selected) {
-                        setInput(selected);
-                        setShowSuggestions(false);
-                        setSelectedSuggestionIndex(-1);
-                      }
-                    }
-                    return;
-                  }
-
-                  // 上下箭头切换历史
-                  if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    if (inputHistory.length > 0) {
-                      const newIndex = historyIndex < inputHistory.length - 1 ? historyIndex + 1 : historyIndex;
-                      setHistoryIndex(newIndex);
-                      setInput(inputHistory[newIndex]);
-                      setShowSuggestions(false);
-                    }
-                    return;
-                  }
-
-                  if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    if (historyIndex > 0) {
-                      const newIndex = historyIndex - 1;
-                      setHistoryIndex(newIndex);
-                      setInput(inputHistory[newIndex]);
-                      setShowSuggestions(false);
-                    } else if (historyIndex === 0) {
-                      setHistoryIndex(-1);
-                      setInput('');
-                      setShowSuggestions(false);
-                    }
-                    return;
-                  }
-
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendMessage();
-                  }
-                }}
-                placeholder="输入问题..."
-                className="flex-1 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow resize-none overflow-hidden"
-                disabled={aiLoading}
-                rows={1}
+          <>
+            <Panel defaultSize={400} minSize={50} maxSize={800} className="bg-white border-r border-slate-200 overflow-y-auto">
+              <TableOfContents
+                chapters={chapters}
+                tree={chapterIndex.tree}
+                currentChapter={currentChapter}
+                onChapterClick={handleChapterClick}
               />
-              {/* 自动补全建议列表 */}
-              {showSuggestions && suggestions.length > 0 && (
-                <div className="absolute bottom-full left-0 right-14 mb-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto z-10">
-                  {suggestions.map((suggestion, index) => (
-                    <div
-                      key={index}
-                      className={`px-3 py-2 text-sm cursor-pointer truncate ${
-                        index === selectedSuggestionIndex
-                          ? 'bg-indigo-50 text-indigo-600'
-                          : 'hover:bg-slate-50'
-                      }`}
-                      onClick={() => {
-                        setInput(suggestion);
-                        setShowSuggestions(false);
-                      }}
-                    >
-                      {suggestion}
-                    </div>
-                  ))}
-                </div>
-              )}
-              <button
-                onClick={handleSendMessage}
-                disabled={aiLoading || !input.trim()}
-                className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl text-sm font-medium hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow shrink-0"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          {/* Edit Session Title Modal */}
-          {showEditSession && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-xl shadow-xl p-6 w-80 max-w-[90vw]">
-                <h3 className="text-lg font-semibold text-slate-800 mb-4">重命名对话</h3>
-                <input
-                  type="text"
-                  value={editingSessionTitle}
-                  onChange={(e) => setEditingSessionTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleSaveSessionTitle();
-                    } else if (e.key === 'Escape') {
-                      setShowEditSession(false);
-                    }
-                  }}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  placeholder="输入新名称..."
-                  autoFocus
-                />
-                <div className="flex gap-2 mt-4 justify-end">
-                  <button
-                    onClick={() => setShowEditSession(false)}
-                    className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                  >
-                    取消
-                  </button>
-                  <button
-                    onClick={handleSaveSessionTitle}
-                    className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-                  >
-                    保存
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+            </Panel>
+            <PanelResizeHandle className="w-1 bg-slate-200 hover:bg-indigo-400 transition-colors" />
           </>
         )}
 
-        {/* Comment Tab Content */}
-        {activeTab === 'comment' && (
-          <div className="flex flex-col h-full">
-            {/* Comment input area */}
-            <div className="p-4 border-b border-slate-100 bg-slate-50">
-              {commentSelection ? (
-                <div className="mb-3">
-                  <p className="text-xs text-slate-500 mb-1">选中的文字:</p>
-                  <p className="text-sm text-slate-700 bg-white p-2 rounded border border-slate-200 line-clamp-3">
-                    {commentSelection}
-                  </p>
-                </div>
-              ) : (
-                <p className="text-sm text-slate-400 mb-3">请先选中一段文字，然后右键选择"评论"</p>
-              )}
-              <textarea
-                value={currentCommentText}
-                onChange={(e) => setCurrentCommentText(e.target.value)}
-                placeholder="输入评论..."
-                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent resize-none"
-                rows={3}
-                disabled={!commentSelection}
+        {/* Content Area with Right Sidebar */}
+        <Panel minSize={30} className="flex flex-col bg-white overflow-hidden">
+          <PanelGroup orientation="horizontal" className="flex flex-1 overflow-hidden">
+            {/* Main Content */}
+            <Panel minSize={30} className="flex flex-col bg-white overflow-hidden relative">
+              <ContextMenu
+                visible={showContextMenu}
+                position={contextMenuPosition}
+                selection={contextMenuSelection}
+                onCopy={handleCopyToClipboard}
+                onAddToAssistant={handleAddToAssistant}
+                onAddToAssistantNewChat={handleAddToAssistantNewChat}
+                onAddComment={handleAddComment}
+                onClose={() => setShowContextMenu(false)}
               />
-              <button
-                onClick={handleSaveComment}
-                disabled={!currentCommentText.trim() || !commentSelection}
-                className="mt-2 w-full px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
-              >
-                保存评论
-              </button>
-            </div>
 
-            {/* Comments list */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {comments.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-center">
-                  <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mb-4">
-                    <svg className="w-8 h-8 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+              {/* Chapter navigation */}
+              {(currentChapterTitle || currentChapter) && (
+                <div className="sticky top-0 bg-white/90 backdrop-blur-sm border-b border-slate-100 p-3 z-10 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                     </svg>
+                    <p className="text-sm text-slate-600 truncate">
+                      {currentChapterTitle || '加载中...'}
+                      {currentChapter && (
+                        <span className="text-xs text-slate-400 ml-1">
+                          ({currentChapter.split('#')[0].split('/').pop()})
+                        </span>
+                      )}
+                    </p>
                   </div>
-                  <p className="text-sm text-slate-500">暂无评论</p>
-                </div>
-              ) : (
-                comments.map((comment) => (
-                  <div
-                    key={comment.id}
-                    className="bg-white border border-slate-200 rounded-lg p-3 hover:border-amber-300 transition-colors"
-                  >
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <p className="text-xs text-slate-500 line-clamp-2 flex-1">
-                        "{comment.selectedText}"
-                      </p>
+                  {currentChapter && totalPages > 0 && (
+                    <div className="flex items-center gap-2">
                       <button
-                        onClick={() => handleDeleteComment(comment.id)}
-                        className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50"
-                        title="删除"
+                        onClick={handlePrevPage}
+                        disabled={currentPage <= 1}
+                        className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                       >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                      </button>
+                      <span className="text-sm text-slate-500 min-w-[80px] text-center">
+                        {currentPage} / {totalPages}
+                      </span>
+                      <button
+                        onClick={handleNextPage}
+                        disabled={currentPage >= totalPages}
+                        className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                         </svg>
                       </button>
                     </div>
-                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{comment.content}</p>
-                    <p className="text-xs text-slate-400 mt-2">
-                      {new Date(comment.timestamp).toLocaleString('zh-CN')}
-                    </p>
-                  </div>
-                ))
+                  )}
+                </div>
               )}
-            </div>
-          </div>
-        )}
-        </aside>
-      </div>
+
+              {/* Epub viewer */}
+              {currentChapter ? (
+                <div
+                  ref={viewerRef}
+                  className="flex-1 overflow-y-auto"
+                  style={{ background: '#fff', color: '#4a4a4a' }}
+                />
+              ) : (
+                <div className="flex-1 flex items-center justify-center bg-slate-50">
+                  <div className="text-center">
+                    <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <svg className="w-8 h-8 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                      </svg>
+                    </div>
+                    <p className="text-slate-500 text-lg mb-2">请从左侧选择章节</p>
+                    <p className="text-slate-400 text-sm">点击目录中的章节开始阅读</p>
+                  </div>
+                </div>
+              )}
+            </Panel>
+
+            <PanelResizeHandle className="w-1 bg-slate-200 hover:bg-indigo-400 transition-colors" />
+
+            {/* Right Sidebar */}
+            <Panel defaultSize={400} minSize={50} className="bg-white border-l border-slate-200 flex flex-col">
+              {/* Tab navigation */}
+              <div className="border-b border-slate-100 flex">
+                <button
+                  onClick={() => setActiveTab('chat')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors ${
+                    activeTab === 'chat'
+                      ? 'text-indigo-600 border-b-2 border-indigo-600'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                  AI 助手
+                </button>
+                <button
+                  onClick={() => setActiveTab('comment')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors ${
+                    activeTab === 'comment'
+                      ? 'text-amber-600 border-b-2 border-amber-600'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                  </svg>
+                  评论 ({comments.length})
+                </button>
+              </div>
+
+              {/* Chat Panel */}
+              {activeTab === 'chat' && (
+                <ChatPanel
+                  sessions={sessions}
+                  currentSessionId={currentSessionId}
+                  messages={messages}
+                  selectedBlocks={selectedBlocks}
+                  expandedBlocks={expandedBlocks}
+                  isSelectedBlocksExpanded={isSelectedBlocksExpanded}
+                  aiLoading={aiLoading}
+                  inputHistory={inputHistory}
+                  onSendMessage={(input, isFirst) => handleSendMessage(input, isFirst)}
+                  onSwitchSession={switchToSession}
+                  onCreateSession={createNewSession}
+                  onDeleteSession={deleteSession}
+                  onEditSession={handleEditSession}
+                  onRemoveBlock={handleRemoveBlock}
+                  onToggleExpandBlock={handleToggleExpandBlock}
+                  onToggleSelectedBlocksExpand={() => setIsSelectedBlocksExpanded(!isSelectedBlocksExpanded)}
+                />
+              )}
+
+              {/* Comment Panel */}
+              {activeTab === 'comment' && (
+                <CommentPanel
+                  comments={comments}
+                  selectedText={commentSelection}
+                  inputText={currentCommentText}
+                  onInputChange={setCurrentCommentText}
+                  onSave={handleSaveComment}
+                  onDelete={handleDeleteComment}
+                />
+              )}
+            </Panel>
+          </PanelGroup>
+        </Panel>
+      </PanelGroup>
+
+      {/* Edit Session Modal */}
+      <EditSessionModal
+        visible={showEditSession}
+        title={editingSessionTitle}
+        onTitleChange={setEditingSessionTitle}
+        onSave={handleSaveSessionTitle}
+        onClose={() => setShowEditSession(false)}
+      />
     </div>
   );
 }
