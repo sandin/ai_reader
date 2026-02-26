@@ -286,36 +286,34 @@ export default function ChatPanel({
             <p className="text-sm text-slate-500">向 AI 提问关于内容的问题</p>
           </div>
         ) : (
-          messages.map((msg, index) => (
-            <div
-              key={msg.id}
-              className={`${msg.role === 'user' ? 'ml-8' : 'mr-8'}`}
-            >
-              <div
-                className={`px-4 py-3 rounded-2xl ${
-                  msg.role === 'user'
-                    ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-br-md'
-                    : 'bg-slate-100 text-slate-800 rounded-bl-md'
-                }`}
-                style={{
-                  fontSize: `${fontSize}px`,
-                  fontFamily,
-                  lineHeight,
-                }}
-              >
-                {msg.role === 'assistant' ? (
-                  <MessageContent content={msg.blocks.map(b => b.content).join('\n\n')} isStreaming={aiLoading && index === messages.length - 1} />
-                ) : (
-                  <UserMessageContent content={msg.blocks.map(b => b.content).join('\n\n')} index={index} />
-                )}
+          <div className="space-y-4">
+            {messages.map((msg, index) => (
+              <div key={msg.id}>
+                {/* Role indicator */}
+                <div className="text-xs text-slate-400 mb-1">
+                  {msg.role === 'user' ? '你' : 'AI'}
+                </div>
+                <div className="text-slate-800 px-2">
+                  {msg.role === 'assistant' ? (
+                    <MessageContent
+                      content={msg.blocks.map(b => b.content).join('\n\n')}
+                      isStreaming={aiLoading && index === messages.length - 1}
+                      fontSize={fontSize}
+                      fontFamily={fontFamily}
+                      lineHeight={lineHeight}
+                    />
+                  ) : (
+                    <UserMessageContent content={msg.blocks.map(b => b.content).join('\n\n')} index={index} />
+                  )}
+                </div>
               </div>
-            </div>
-          ))
+            ))}
+          </div>
         )}
       </div>
 
       {/* Input area */}
-      <div className="p-4 border-t border-slate-100 bg-slate-50">
+      <div className="min-h-[120px] p-4 border-t border-slate-100 bg-slate-50 shrink-0">
         <div className="flex gap-2 items-end relative">
           <button
             onClick={onCreateSession}
@@ -378,7 +376,19 @@ export default function ChatPanel({
 }
 
 // Message content component for AI responses
-function MessageContent({ content, isStreaming }: { content: string; isStreaming: boolean }) {
+function MessageContent({
+  content,
+  isStreaming,
+  fontSize = 18,
+  fontFamily = 'Georgia, serif',
+  lineHeight = 1.8,
+}: {
+  content: string;
+  isStreaming: boolean;
+  fontSize?: number;
+  fontFamily?: string;
+  lineHeight?: number;
+}) {
   if (isStreaming && !content) {
     return (
       <div className="flex items-center gap-2">
@@ -394,7 +404,7 @@ function MessageContent({ content, isStreaming }: { content: string; isStreaming
   return (
     <ReactMarkdown
       components={{
-        p: ({ children }) => <p className="mb-2">{children}</p>,
+        p: ({ children }) => <p className="mb-2" style={{ fontSize: `${fontSize}px`, fontFamily, lineHeight }}>{children}</p>,
         ul: ({ children }) => <ul className="list-disc ml-4 mb-2">{children}</ul>,
         ol: ({ children }) => <ol className="list-decimal ml-4 mb-2">{children}</ol>,
         li: ({ children }) => <li className="mb-1">{children}</li>,
@@ -423,10 +433,11 @@ function MessageContent({ content, isStreaming }: { content: string; isStreaming
 // User message content component - shows only content after "用户提问：" for first message
 function UserMessageContent({ content, index }: { content: string; index: number }) {
   const isFirstUserMessage = index === 0;
+  let text = content;
   if (isFirstUserMessage) {
     // Extract content after "用户提问："
     const match = content.match(/用户提问：([\s\S]*)/);
-    return match ? match[1] : content;
+    text = match ? match[1] : content;
   }
-  return content;
+  return <div className="whitespace-pre-wrap">{text}</div>;
 }
