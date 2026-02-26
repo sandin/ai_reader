@@ -37,9 +37,9 @@ export async function POST(request: Request) {
     // Bookmark file path (per-book)
     const bookmarkFilePath = path.join(bookNotesDir, 'bookmark.json');
 
-    // Save bookmark data
+    // Save simplified bookmark data (chapter info is in index.json)
     const bookmarkData = {
-      chapter,
+      htmlFile: chapter, // Just save the HTML file name
       cfi: cfi || '',
       timestamp: Date.now(),
     };
@@ -83,7 +83,7 @@ export async function GET(request: Request) {
     const bookmarkFilePath = path.join(process.cwd(), 'notes', bookName, 'bookmark.json');
 
     if (!fs.existsSync(bookmarkFilePath)) {
-      return NextResponse.json({ chapter: null, cfi: null });
+      return NextResponse.json({ htmlFile: null, cfi: null });
     }
 
     try {
@@ -92,7 +92,7 @@ export async function GET(request: Request) {
 
       return NextResponse.json(bookmarkData);
     } catch (e) {
-      return NextResponse.json({ chapter: null, cfi: null });
+      return NextResponse.json({ htmlFile: null, cfi: null });
     }
   } catch (error) {
     console.error('Error getting reading progress:', error);

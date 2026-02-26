@@ -12,6 +12,20 @@ interface Chapter {
   href: string;
 }
 
+// Tree structure for TOC
+interface TreeNode {
+  chapter_id: string;
+  chapter_name: string;
+  href: string;
+  contents: string[];
+  children: TreeNode[];
+}
+
+interface ChapterIndex {
+  tree: TreeNode[];
+  htmlOrder: string[];
+}
+
 interface Block {
   id: string;
   content: string;
@@ -41,6 +55,9 @@ export default function ReaderPage() {
   const [fontFamily, setFontFamily] = useState('Georgia, serif');
   const [lineHeight, setLineHeight] = useState(1.8);
   const [savedCfi, setSavedCfi] = useState<string | null>(null);
+  const [savedHtmlFile, setSavedHtmlFile] = useState<string>('');
+  // Chapter index: htmlFile -> { chapterTitle, chapterHref }
+  const [chapterIndex, setChapterIndex] = useState<ChapterIndex>({ tree: [], htmlOrder: [] });
   const currentCfiRef = useRef<string>('');
   const saveProgressTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -59,11 +76,11 @@ export default function ReaderPage() {
     { value: '"Noto Serif SC", "SimSun", serif', label: '思源宋体' },
   ];
   const [showToc, setShowToc] = useState(true);
+  // Track expanded tree nodes
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [selectedChapter, setSelectedChapter] = useState<string | null>(null);
   const [isContentReady, setIsContentReady] = useState(false);
   const [bookTitle, setBookTitle] = useState<string>('');
-  const [spineItems, setSpineItems] = useState<string[]>([]);
-  const [currentSpineIndex, setCurrentSpineIndex] = useState<number>(0);
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -292,23 +309,139 @@ export default function ReaderPage() {
 
         setChapters(chapterList);
 
+        // Build and save chapter index with tree structure
+        try {
+          // Try to get existing index first
+          const indexRes = await fetch(`/api/index?bookId=${bookId}`);
+          let loadedIndex: ChapterIndex = { tree: [], htmlOrder: [] };
+          if (indexRes.ok) {
+            loadedIndex = await indexRes.json();
+          }
+          // If index is empty or doesn't exist, create new one
+          if (!loadedIndex.tree || loadedIndex.tree.length === 0) {
+            // Get manifest items to build html order
+            const manifest = bookInstance.loaded.manifest as any;
+            // Use spine to get HTML file order
+            const spine = bookInstance.spine as any;
+            const spineItems = spine ? Array.from(spine.items || spine) : [];
+            const htmlOrder = spineItems
+              .filter((item: any) => item.href)
+              .map((item: any) => item.href);
+            console.log('HTML order from spine:', htmlOrder.length, htmlOrder.slice(0, 5));
+
+            // Build tree from navigation.toc (which is already hierarchical)
+            console.log('TOC structure sample:', JSON.stringify(toc.slice(0, 2), null, 2));
+
+            const buildTree = (navItems: any[]): TreeNode[] => {
+              const nodes: TreeNode[] = [];
+              for (let i = 0; i < navItems.length; i++) {
+                const nav = navItems[i];
+                const href = nav.href || '';
+                const firstHtml = href.split('#')[0];
+
+                // Calculate contents: from this chapter's first HTML to next chapter's first HTML
+                const contents: string[] = [];
+                const currentIndex = htmlOrder.findIndex(h => h.includes(firstHtml.split('/').pop() || ''));
+
+                if (currentIndex !== -1) {
+                  // Add all HTMLs until the next chapter starts
+                  for (let j = currentIndex; j < htmlOrder.length; j++) {
+                    const nextChapterHref = navItems[i + 1]?.href || '';
+                    const nextChapterFirstHtml = nextChapterHref.split('#')[0];
+                    const nextChapterIndex = htmlOrder.findIndex(h => h.includes(nextChapterFirstHtml.split('/').pop() || ''));
+
+                    if (nextChapterIndex !== -1 && j >= nextChapterIndex) {
+                      break;
+                    }
+                    contents.push(htmlOrder[j]);
+                  }
+                }
+
+                // Check for children - epubjs uses 'subitems' or 'children'
+                const childItems = nav.subitems || nav.children || [];
+                const node: TreeNode = {
+                  chapter_id: nav.id || `chapter_${i}`,
+                  chapter_name: (nav.label || '').trim(),
+                  href: nav.href || '',
+                  contents: contents,
+                  children: childItems.length > 0 ? buildTree(childItems) : [],
+                };
+                nodes.push(node);
+              }
+              return nodes;
+            };
+
+            const tree = buildTree(toc);
+            console.log('Building tree:', tree.length, 'chapters');
+            console.log('HTML order:', htmlOrder.length, 'files');
+
+            // Save to server
+            const saveRes = await fetch('/api/index', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                bookId,
+                tree,
+                htmlOrder,
+              }),
+            });
+            const saveResult = await saveRes.json();
+            console.log('Save index result:', saveResult);
+
+            if (saveResult.success) {
+              setChapterIndex({ tree, htmlOrder });
+            } else {
+              console.error('Failed to save index:', saveResult.error);
+            }
+          } else {
+            setChapterIndex(loadedIndex);
+          }
+        } catch (err) {
+          console.error('Failed to load/save chapter index:', err);
+        }
+
         // Don't render content immediately, wait for user to select a chapter
         setIsContentReady(true);
 
         // Try to load saved reading progress
         let defaultChapter = toc.length > 0 ? toc[0].href : '';
         let loadedCfi: string | null = null;
+        let loadedHtmlFile = '';
         try {
           const progressRes = await fetch(`/api/progress?bookId=${bookId}`);
           if (progressRes.ok) {
             const progressData = await progressRes.json();
-            if (progressData.chapter) {
+            if (progressData.htmlFile) {
+              loadedHtmlFile = progressData.htmlFile;
               // Verify the saved chapter exists in this book
               const savedChapterExists = chapterList.some(
-                (c: Chapter) => c.href.startsWith(progressData.chapter) || progressData.chapter.includes(c.href.split('#')[0])
+                (c: Chapter) => c.href.includes(loadedHtmlFile) || loadedHtmlFile.includes(c.href.split('#')[0].split('/').pop() || '')
               );
               if (savedChapterExists) {
-                defaultChapter = progressData.chapter;
+                // Find matching chapter from TOC using the index tree
+                const htmlFileName = loadedHtmlFile.split('/').pop() || loadedHtmlFile;
+                const findInTree = (nodes: TreeNode[]): TreeNode | null => {
+                  for (const node of nodes) {
+                    if (node.contents.some(c => c.includes(htmlFileName) || htmlFileName.includes(c))) {
+                      return node;
+                    }
+                    if (node.children.length > 0) {
+                      const found = findInTree(node.children);
+                      if (found) return found;
+                    }
+                  }
+                  return null;
+                };
+                const indexInfo = findInTree(chapterIndex.tree);
+                if (indexInfo) {
+                  defaultChapter = indexInfo.contents[0] || '';
+                } else {
+                  // Fallback: find from chapters list
+                  const matched = chapterList.find(c => c.href.split('#')[0].split('/').pop() === htmlFileName);
+                  if (matched) {
+                    defaultChapter = matched.href;
+                  }
+                }
               }
             }
             // Save CFI for bookmark restoration
@@ -320,18 +453,14 @@ export default function ReaderPage() {
           console.error('Failed to load reading progress:', err);
         }
 
-        // Set saved CFI for later use when displaying
+        // Set saved data for later use when displaying
         setSavedCfi(loadedCfi);
+        setSavedHtmlFile(loadedHtmlFile);
 
         if (defaultChapter) {
           // Set default chapter and auto-display it
           setCurrentChapter(defaultChapter);
           setSelectedChapter(defaultChapter);
-
-          // Get spine items for the chapter
-          const items = getSpineItemsForHref(defaultChapter);
-          setSpineItems(items);
-          setCurrentSpineIndex(0);
         }
       } catch (err) {
         console.error('Error loading book:', err);
@@ -357,136 +486,10 @@ export default function ReaderPage() {
     if (isContentReady && book && selectedChapter && !rendition && viewerRef.current) {
       // Wait for viewer to be ready
       const timer = setTimeout(async () => {
-        if (!viewerRef.current) return;
+        const renditionInstance = createRenditionInstance();
+        if (!renditionInstance) return;
 
-        const renditionInstance = book.renderTo(viewerRef.current, {
-          width: '100%',
-          height: '100%',
-          spread: 'none',
-          flow: 'scrolled' as any,
-        });
-
-        renditionInstance.themes.fontSize(`${fontSize}px`);
-        renditionInstance.themes.font(fontFamily);
-        renditionInstance.themes.register('*', {
-          'line-height': lineHeight.toString(),
-          'color': '#4a4a4a',
-        });
-
-        renditionInstance.on('relocated', (location: { start: { href: string; cfi: string } }) => {
-          setCurrentChapter(location.start.href);
-
-          // Save CFI for bookmark
-          const cfi = location.start.cfi;
-          currentCfiRef.current = cfi;
-
-          // Debounce save progress (save every 2 seconds of no movement)
-          if (saveProgressTimeoutRef.current) {
-            clearTimeout(saveProgressTimeoutRef.current);
-          }
-          saveProgressTimeoutRef.current = setTimeout(() => {
-            const htmlFile = location.start.href.split('#')[0];
-            saveProgress(htmlFile, cfi);
-          }, 2000);
-        });
-
-        // Handle text selection
-        if (!selectionHandlerAdded.current) {
-          selectionHandlerAdded.current = true;
-          renditionInstance.on('rendered', () => {
-            const tryBind = (attempts: number) => {
-              if (attempts <= 0) return;
-              const container = viewerRef.current;
-              const iframe = container?.querySelector('iframe');
-
-              if (iframe && iframe.contentWindow) {
-                const win = iframe.contentWindow;
-
-                // Load notes when rendered
-                setTimeout(() => {
-                  if (bookId && selectedChapter) {
-                    const htmlFile = selectedChapter.split('#')[0];
-                    const encodedHtmlFile = encodeURIComponent(htmlFile);
-                    fetch(`/api/note/${bookId}/${encodedHtmlFile}`)
-                      .then(res => res.json())
-                      .then(data => {
-                        if (data.sessions && data.sessions.length > 0) {
-                          const loadedSessions = data.sessions.map((session: any) => ({
-                            id: session.id,
-                            title: session.title || `对话 ${data.sessions.indexOf(session) + 1}`,
-                            selectedBlocks: session.selectedBlocks || [],
-                            messages: session.messages || [],
-                            timestamp: session.timestamp,
-                          }));
-                          setSessions(loadedSessions);
-                          const mostRecent = loadedSessions.sort((a: any, b: any) => b.timestamp - a.timestamp)[0];
-                          setCurrentSessionId(mostRecent.id);
-                          setMessages(mostRecent.messages || []);
-                          setSelectedBlocks(mostRecent.selectedBlocks || []);
-                        } else {
-                          setSessions([]);
-                          setCurrentSessionId(null);
-                          setMessages([]);
-                          setSelectedBlocks([]);
-                        }
-                      })
-                      .catch(err => console.error('Failed to load notes:', err));
-
-                    // Load comments inline
-                    if (bookId && selectedChapter) {
-                      const commentHtmlFile = selectedChapter.split('#')[0];
-                      const commentEncodedHtmlFile = encodeURIComponent(commentHtmlFile);
-                      fetch(`/api/note/${bookId}/${commentEncodedHtmlFile}`)
-                        .then(res => res.json())
-                        .then(data => {
-                          // Filter comments for current chapter only
-                          const currentChapterFile = commentHtmlFile.split('/').pop() || commentHtmlFile;
-                          const filteredComments = (data.comments || []).filter((comment: any) => {
-                            const commentChapter = comment.chapter || '';
-                            const commentChapterFile = commentChapter.split('/').pop() || commentChapter;
-                            return commentChapterFile === currentChapterFile ||
-                                   currentChapterFile.replace(/\.[^/.]+$/, '') === commentChapterFile.replace(/\.[^/.]+$/, '');
-                          });
-                          if (filteredComments.length > 0) {
-                            setComments(filteredComments);
-                          } else {
-                            setComments([]);
-                          }
-                        })
-                        .catch(err => console.error('Failed to load comments:', err));
-                    }
-                  }
-                }, 100);
-
-                // Handle right-click
-                win.addEventListener('contextmenu', (e: MouseEvent) => {
-                  e.preventDefault();
-                  setTimeout(() => {
-                    const selection = win.getSelection();
-                    const selectedText = selection ? selection.toString().trim() : '';
-
-                    if (selectedText && selection && selection.rangeCount > 0) {
-                      const iframeRect = iframe.getBoundingClientRect();
-                      setContextMenuPosition({
-                        x: iframeRect.left + e.clientX,
-                        y: iframeRect.top + e.clientY
-                      });
-                      setContextMenuSelection(selectedText);
-                      setShowContextMenu(true);
-                    }
-                  }, 10);
-                });
-
-                renditionInstance.on('selected', (cfiRange: string) => {
-                  setContextMenuCfiRange(cfiRange);
-                });
-              } else {
-                setTimeout(() => tryBind(attempts - 1), 500);
-              }
-            };
-            tryBind(5);
-          });
-        }
+        setupRenditionEvents(renditionInstance, { initialChapter: selectedChapter || undefined });
 
         setRendition(renditionInstance);
 
@@ -513,76 +516,10 @@ export default function ReaderPage() {
     }
   }, [fontSize, fontFamily, lineHeight, rendition]);
 
-  // Get spine items between current chapter and next chapter
-  const getSpineItemsForHref = useCallback((href: string): string[] => {
-    if (!book) return [];
-    const spine = book.spine as any;
-
-    // Get all spine items as array
-    const spineArray: any[] = spine.items ? Array.from(spine.items) : Array.from(spine);
-
-    // Get the base href without fragment
-    const baseHref = href.split('#')[0];
-
-    // Find the index of current chapter in spine
-    let currentIndex = -1;
-    for (let i = 0; i < spineArray.length; i++) {
-      const itemHref = spineArray[i].href.split('#')[0];
-      if (itemHref === baseHref || baseHref.includes(itemHref) || itemHref.includes(baseHref)) {
-        currentIndex = i;
-        break;
-      }
-    }
-
-    if (currentIndex === -1) {
-      // If can't find, return all as fallback
-      return spineArray.map((item: any) => item.href);
-    }
-
-    // Find next chapter's index (from toc)
-    let nextIndex = spineArray.length;
-    const currentChapterIndex = chapters.findIndex(c => c.href === href || href.includes(c.href));
-
-    if (currentChapterIndex !== -1 && currentChapterIndex < chapters.length - 1) {
-      const nextHref = chapters[currentChapterIndex + 1].href.split('#')[0];
-      for (let i = currentIndex + 1; i < spineArray.length; i++) {
-        const itemHref = spineArray[i].href.split('#')[0];
-        if (itemHref === nextHref || nextHref.includes(itemHref) || itemHref.includes(nextHref)) {
-          nextIndex = i;
-          break;
-        }
-      }
-    }
-
-    // Return items from currentIndex to nextIndex (exclusive)
-    const items: string[] = [];
-    for (let i = currentIndex; i < nextIndex; i++) {
-      items.push(spineArray[i].href);
-    }
-
-    // If only 1 item found, check if there are more items with similar path
-    if (items.length === 1) {
-      const firstItemPath = items[0].split('#')[0].replace('.html', '').replace('.xhtml', '').replace('.htm', '');
-      for (let i = currentIndex + 1; i < spineArray.length; i++) {
-        const itemPath = spineArray[i].href.split('#')[0].replace('.html', '').replace('.xhtml', '').replace('.htm', '');
-        // Check if it's a continuation (e.g., chapter1.html, chapter1_1.html, chapter1_2.html)
-        if (itemPath.startsWith(firstItemPath) || firstItemPath.startsWith(itemPath)) {
-          if (!items.includes(spineArray[i].href)) {
-            items.push(spineArray[i].href);
-          }
-        } else {
-          break;
-        }
-      }
-    }
-
-    return items;
-  }, [book, chapters]);
-
-  // Save reading progress to server
-  const saveProgress = useCallback((chapter: string, cfi?: string) => {
+  // Save reading progress to server (only htmlFile is needed, chapter info is in index.json)
+  const saveProgress = useCallback((chapter: string, cfi?: string, onSuccess?: () => void) => {
     if (!bookId || !chapter) return;
-    const htmlFile = chapter.split('#')[0];
+    const htmlFile = chapter.split('#')[0].split('/').pop() || chapter;
     fetch('/api/progress', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -591,17 +528,18 @@ export default function ReaderPage() {
         chapter: htmlFile,
         cfi: cfi || '',
       }),
+    }).then(() => {
+      if (onSuccess) onSuccess();
     }).catch(err => console.error('Failed to save progress:', err));
   }, [bookId]);
 
   const handleChapterClick = useCallback(async (href: string) => {
+    // Find chapter title from chapters list
+    const matchedChapter = chapters.find(c => c.href === href);
+    const chapterTitle = matchedChapter?.label || '';
+
     // Set selected chapter first
     setSelectedChapter(href);
-
-    // Get spine items for this chapter
-    const items = getSpineItemsForHref(href);
-    setSpineItems(items);
-    setCurrentSpineIndex(0);
 
     // Create rendition if not exists
     if (!rendition && book && viewerRef.current) {
@@ -609,120 +547,10 @@ export default function ReaderPage() {
       await new Promise(resolve => setTimeout(resolve, 50));
 
       if (viewerRef.current) {
-        const renditionInstance = book.renderTo(viewerRef.current, {
-          width: '100%',
-          height: '100%',
-          spread: 'none',
-          flow: 'scrolled' as any,
-        });
+        const renditionInstance = createRenditionInstance();
+        if (!renditionInstance) return;
 
-        renditionInstance.themes.fontSize(`${fontSize}px`);
-        renditionInstance.themes.font(fontFamily);
-        renditionInstance.themes.register('*', {
-          'line-height': lineHeight.toString(),
-          'color': '#4a4a4a',
-        });
-
-        renditionInstance.on('relocated', (location: { start: { href: string; cfi: string } }) => {
-          setCurrentChapter(location.start.href);
-
-          // Save CFI for bookmark
-          const cfi = location.start.cfi;
-          currentCfiRef.current = cfi;
-
-          // Debounce save progress (save every 2 seconds of no movement)
-          if (saveProgressTimeoutRef.current) {
-            clearTimeout(saveProgressTimeoutRef.current);
-          }
-          saveProgressTimeoutRef.current = setTimeout(() => {
-            const htmlFile = location.start.href.split('#')[0];
-            saveProgress(htmlFile, cfi);
-          }, 2000);
-        });
-
-        // Handle text selection via mouseup event
-        if (!selectionHandlerAdded.current) {
-          selectionHandlerAdded.current = true;
-          renditionInstance.on('rendered', () => {
-            // Try to find iframe in the rendition's container
-            const tryBind = (attempts: number) => {
-              if (attempts <= 0) return;
-
-              // Find iframe in the viewer container
-              const container = viewerRef.current;
-              const iframe = container?.querySelector('iframe');
-
-              if (iframe && iframe.contentWindow) {
-                const win = iframe.contentWindow;
-
-                // Load notes when rendered (directly call, not via ref)
-                setTimeout(() => {
-                  // Call loadNotesForChapter directly since it's in scope
-                  if (bookId) {
-                    const htmlFile = href.split('#')[0];
-                    const encodedHtmlFile = encodeURIComponent(htmlFile);
-                    fetch(`/api/note/${bookId}/${encodedHtmlFile}`)
-                      .then(res => res.json())
-                      .then(data => {
-                        // Load from sessions (new format)
-                        if (data.sessions && data.sessions.length > 0) {
-                          const loadedSessions = data.sessions.map((session: any) => ({
-                            id: session.id,
-                            title: session.title || `对话 ${data.sessions.indexOf(session) + 1}`,
-                            selectedBlocks: session.selectedBlocks || [],
-                            messages: session.messages || [],
-                            timestamp: session.timestamp,
-                          }));
-                          setSessions(loadedSessions);
-                          const mostRecent = loadedSessions.sort((a: any, b: any) => b.timestamp - a.timestamp)[0];
-                          setCurrentSessionId(mostRecent.id);
-                          setMessages(mostRecent.messages || []);
-                          setSelectedBlocks(mostRecent.selectedBlocks || []);
-                        } else {
-                          setSessions([]);
-                          setCurrentSessionId(null);
-                          setMessages([]);
-                          setSelectedBlocks([]);
-                        }
-                      })
-                      .catch(err => console.error('Failed to load notes:', err));
-
-                    // Comments will be loaded via useEffect when currentChapter changes
-                  }
-                }, 100);
-
-                // Handle right-click to show context menu
-                win.addEventListener('contextmenu', (e: MouseEvent) => {
-                  e.preventDefault();
-                  setTimeout(() => {
-                    const selection = win.getSelection();
-                    const selectedText = selection ? selection.toString().trim() : '';
-
-                    if (selectedText && selection && selection.rangeCount > 0) {
-                      // Get iframe position relative to parent document
-                      const iframeRect = iframe.getBoundingClientRect();
-                      // Show context menu at mouse position (add iframe offset for parent document)
-                      setContextMenuPosition({
-                        x: iframeRect.left + e.clientX,
-                        y: iframeRect.top + e.clientY
-                      });
-                      setContextMenuSelection(selectedText);
-                      setShowContextMenu(true);
-                    }
-                  }, 10);
-                });
-
-                // Also listen to epubjs selected event to get CFI
-                renditionInstance.on('selected', (cfiRange: string) => {
-                  setContextMenuCfiRange(cfiRange);
-                });
-              } else {
-                setTimeout(() => tryBind(attempts - 1), 500);
-              }
-            };
-            tryBind(5);
-          });
-        }
+        setupRenditionEvents(renditionInstance, { initialChapter: href });
 
         setRendition(renditionInstance);
         await renditionInstance.display(href);
@@ -733,14 +561,24 @@ export default function ReaderPage() {
 
     setCurrentChapter(href);
     saveProgress(href);
-  }, [rendition, book, fontSize, getSpineItemsForHref, saveProgress]);
+  }, [rendition, book, saveProgress]);
 
-  // Navigate to previous spine item
+  // Get current page number based on htmlOrder
+  const getCurrentPageNumber = () => {
+    if (!currentChapter || !chapterIndex.htmlOrder || chapterIndex.htmlOrder.length === 0) return 0;
+    const currentHtml = currentChapter.split('#')[0];
+    const index = chapterIndex.htmlOrder.findIndex(h => h.includes(currentHtml.split('/').pop() || ''));
+    return index >= 0 ? index + 1 : 0;
+  };
+
+  const totalPages = chapterIndex.htmlOrder?.length || 0;
+  const currentPage = getCurrentPageNumber();
+
+  // Navigate to previous page using htmlOrder
   const handlePrevPage = useCallback(async () => {
-    if (currentSpineIndex > 0 && rendition) {
-      const newIndex = currentSpineIndex - 1;
-      setCurrentSpineIndex(newIndex);
-      const newHref = spineItems[newIndex];
+    if (currentPage > 1 && rendition) {
+      const newIndex = currentPage - 2; // -2 because currentPage is 1-based
+      const newHref = chapterIndex.htmlOrder[newIndex];
       setCurrentChapter(newHref);
       saveProgress(newHref);
       try {
@@ -749,14 +587,12 @@ export default function ReaderPage() {
         console.error('Error displaying prev:', err);
       }
     }
-  }, [currentSpineIndex, spineItems, rendition, saveProgress]);
+  }, [currentPage, chapterIndex.htmlOrder, rendition, saveProgress]);
 
-  // Navigate to next spine item
+  // Navigate to next page using htmlOrder
   const handleNextPage = useCallback(async () => {
-    if (currentSpineIndex < spineItems.length - 1 && rendition) {
-      const newIndex = currentSpineIndex + 1;
-      setCurrentSpineIndex(newIndex);
-      const newHref = spineItems[newIndex];
+    if (currentPage < totalPages && rendition) {
+      const newHref = chapterIndex.htmlOrder[currentPage];
       setCurrentChapter(newHref);
       saveProgress(newHref);
       try {
@@ -765,7 +601,7 @@ export default function ReaderPage() {
         console.error('Error displaying next:', err);
       }
     }
-  }, [currentSpineIndex, spineItems, rendition, saveProgress]);
+  }, [currentPage, totalPages, chapterIndex.htmlOrder, rendition, saveProgress]);
 
   const handleSendMessage = async () => {
     if (!input.trim() || aiLoading) return;
@@ -1258,6 +1094,93 @@ export default function ReaderPage() {
     }
   }, [bookId]);
 
+  // Create rendition instance
+  const createRenditionInstance = useCallback(() => {
+    if (!viewerRef.current || !book) return null;
+    return book.renderTo(viewerRef.current, {
+      width: '100%',
+      height: '100%',
+      spread: 'none',
+      flow: 'scrolled' as any,
+    });
+  }, [book]);
+
+  // Setup rendition themes and event listeners
+  const setupRenditionEvents = useCallback((renditionInstance: any, options: { initialChapter?: string } = {}) => {
+    // Apply theme settings
+    renditionInstance.themes.fontSize(`${fontSize}px`);
+    renditionInstance.themes.font(fontFamily);
+    renditionInstance.themes.override("color", '#3a3a3a', true);
+    renditionInstance.themes.override("line-height", lineHeight.toString(), true);
+
+    // Handle location changes
+    renditionInstance.on('relocated', (location: { start: { href: string; cfi: string } }) => {
+      const href = location.start.href;
+      setCurrentChapter(href);
+      // Sync selectedChapter for TOC active state
+      setSelectedChapter(href);
+
+      // Save CFI for bookmark
+      const cfi = location.start.cfi;
+      currentCfiRef.current = cfi;
+
+      // Save progress with debounce (chapter info is in index.json)
+      const htmlFile = href.split('#')[0];
+
+      if (saveProgressTimeoutRef.current) {
+        clearTimeout(saveProgressTimeoutRef.current);
+      }
+      saveProgressTimeoutRef.current = setTimeout(() => {
+        saveProgress(htmlFile, cfi);
+      }, 2000);
+    });
+
+    // Handle rendered event - bind iframe events
+    if (!selectionHandlerAdded.current) {
+      selectionHandlerAdded.current = true;
+      renditionInstance.on('rendered', () => {
+        const tryBind = (attempts: number) => {
+          if (attempts <= 0) return;
+          const container = viewerRef.current;
+          const iframe = container?.querySelector('iframe');
+
+          if (iframe && iframe.contentWindow) {
+            const win = iframe.contentWindow;
+
+            // Data loading is handled by useEffect when currentChapter changes
+
+            // Handle right-click context menu
+            win.addEventListener('contextmenu', (e: MouseEvent) => {
+              e.preventDefault();
+              setTimeout(() => {
+                const selection = win.getSelection();
+                const selectedText = selection ? selection.toString().trim() : '';
+
+                if (selectedText && selection && selection.rangeCount > 0) {
+                  const iframeRect = iframe.getBoundingClientRect();
+                  setContextMenuPosition({
+                    x: iframeRect.left + e.clientX,
+                    y: iframeRect.top + e.clientY
+                  });
+                  setContextMenuSelection(selectedText);
+                  setShowContextMenu(true);
+                }
+              }, 10);
+            });
+
+            // Listen to epubjs selected event for CFI
+            renditionInstance.on('selected', (cfiRange: string) => {
+              setContextMenuCfiRange(cfiRange);
+            });
+          } else {
+            setTimeout(() => tryBind(attempts - 1), 500);
+          }
+        };
+        tryBind(5);
+      });
+    }
+  }, [fontSize, fontFamily, lineHeight, saveProgress, loadNotesForChapter, loadCommentsForChapter, selectedChapter, currentChapter]);
+
   // Load notes and comments when currentChapter changes
   useEffect(() => {
     if (currentChapter && isContentReady) {
@@ -1265,6 +1188,13 @@ export default function ReaderPage() {
       loadCommentsForChapter(currentChapter);
     }
   }, [currentChapter, isContentReady, loadNotesForChapter, loadCommentsForChapter]);
+
+  // Sync selectedChapter with currentChapter for TOC active state
+  useEffect(() => {
+    if (currentChapter) {
+      setSelectedChapter(currentChapter);
+    }
+  }, [currentChapter]);
 
   // 当 isContentReady 变为 true 时，加载当前 session 的高亮
   useEffect(() => {
@@ -1614,7 +1544,134 @@ export default function ReaderPage() {
     );
   }
 
-  const currentChapterTitle = chapters.find(c => currentChapter.includes(c.href) || c.href.includes(currentChapter))?.label || '';
+  // Helper to find chapter in tree by HTML file
+  const findChapterInTree = (tree: TreeNode[], htmlFile: string): TreeNode | null => {
+    for (const node of tree) {
+      // Check if htmlFile is in this node's contents
+      if (node.contents.some(c => c.includes(htmlFile) || htmlFile.includes(c))) {
+        return node;
+      }
+      // Check children
+      if (node.children.length > 0) {
+        const found = findChapterInTree(node.children, htmlFile);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  // Helper to get chapter info from index based on current chapter
+  const getChapterInfo = (href: string) => {
+    const htmlFileName = href.split('#')[0].split('/').pop() || '';
+    // Try to find in tree
+    const found = findChapterInTree(chapterIndex.tree, htmlFileName);
+    if (found) {
+      return { chapterTitle: found.chapter_name, chapterHref: found.contents[0] || href };
+    }
+    // Fallback to chapters list
+    const matched = chapters.find(c => c.href.includes(htmlFileName) || htmlFileName.includes(c.href.split('#')[0].split('/').pop() || ''));
+    if (matched) {
+      return { chapterTitle: matched.label, chapterHref: matched.href };
+    }
+    return null;
+  };
+
+  // Toggle node expansion
+  const toggleNode = (chapterId: string) => {
+    setExpandedNodes(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(chapterId)) {
+        newSet.delete(chapterId);
+      } else {
+        newSet.add(chapterId);
+      }
+      return newSet;
+    });
+  };
+
+  // Recursive render function for tree chapters (VSCode Explorer style)
+  const renderTreeChapter = (tree: TreeNode[], activeHref: string, level: number = 0) => {
+    return tree.map((node) => {
+      const nodeHref = node.href || '';
+      // Check if current page is in this node's contents or href matches
+      const isActive = node.contents.some(c =>
+        activeHref.includes(c.split('#')[0].split('/').pop() || '') || c.includes(activeHref)
+      ) || nodeHref.includes(activeHref.split('#')[0].split('/').pop() || '') ||
+        activeHref.includes(nodeHref.split('#')[0].split('/').pop() || '');
+      const hasChildren = node.children && node.children.length > 0;
+      const isExpanded = expandedNodes.has(node.chapter_id);
+
+      return (
+        <li key={node.chapter_id}>
+          <div className="flex items-center">
+            {/* Expand/collapse chevron */}
+            {hasChildren ? (
+              <button
+                onClick={() => toggleNode(node.chapter_id)}
+                className="p-1 hover:bg-slate-200 rounded transition-colors"
+                style={{ marginLeft: `${level * 16}px` }}
+              >
+                <svg
+                  className={`w-3 h-3 text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                </svg>
+              </button>
+            ) : (
+              <span style={{ width: '20px', marginLeft: `${level * 16 + 4}px` }} />
+            )}
+
+            {/* Chapter icon */}
+            <button
+              onClick={() => node.href && handleChapterClick(node.href)}
+              className={`flex-1 text-left px-2 py-1.5 text-sm truncate transition-colors ${
+                isActive
+                  ? 'bg-indigo-100 text-indigo-700 font-medium'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              {/* File/folder icon */}
+              {hasChildren ? (
+                <svg className="w-4 h-4 inline-block mr-1.5 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4 inline-block mr-1.5 text-slate-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+                </svg>
+              )}
+              {node.chapter_name}
+            </button>
+          </div>
+
+          {/* Children */}
+          {hasChildren && isExpanded && (
+            <ul className="ml-0">
+              {renderTreeChapter(node.children, activeHref, level + 1)}
+            </ul>
+          )}
+        </li>
+      );
+    });
+  };
+
+  // Get current chapter info
+  const currentChapterInfo = getChapterInfo(selectedChapter || currentChapter);
+  const currentChapterTitle = currentChapterInfo?.chapterTitle || '';
+
+  // Get saved chapter info for initial load
+  const getSavedChapterInfo = () => {
+    if (savedHtmlFile) {
+      const found = findChapterInTree(chapterIndex.tree, savedHtmlFile);
+      if (found) {
+        return { chapterHref: found.contents[0] || '' };
+      }
+    }
+    return null;
+  };
+  const savedChapterInfo = getSavedChapterInfo();
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 to-slate-100">
@@ -1745,24 +1802,30 @@ export default function ReaderPage() {
               <h2 className="font-semibold text-slate-800">目录</h2>
             </div>
             <ul className="space-y-1 mt-4">
-              {chapters.map((chapter) => {
-                const activeHref = selectedChapter || currentChapter;
-                const isActive = activeHref.includes(chapter.href) || chapter.href.includes(activeHref);
-                return (
-                  <li key={chapter.id}>
-                    <button
-                      onClick={() => handleChapterClick(chapter.href)}
-                      className={`w-full text-left px-3 py-2.5 rounded-lg text-sm truncate transition-colors ${
-                        isActive
-                          ? 'bg-indigo-50 text-indigo-700 font-medium'
-                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                      }`}
-                    >
-                      {chapter.label}
-                    </button>
-                  </li>
-                );
-              })}
+              {/* Render tree structure */}
+              {chapterIndex.tree.length > 0 ? (
+                renderTreeChapter(chapterIndex.tree, selectedChapter || currentChapter || '')
+              ) : (
+                // Fallback to flat chapters list
+                chapters.map((chapter) => {
+                  const activeHref = (savedChapterInfo?.chapterHref) || selectedChapter || currentChapter;
+                  const isActive = activeHref.includes(chapter.href) || chapter.href.includes(activeHref);
+                  return (
+                    <li key={chapter.id}>
+                      <button
+                        onClick={() => handleChapterClick(chapter.href)}
+                        className={`w-full text-left px-3 py-2.5 rounded-lg text-sm truncate transition-colors ${
+                          isActive
+                            ? 'bg-indigo-50 text-indigo-700 font-medium'
+                            : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                        }`}
+                      >
+                        {chapter.label}
+                      </button>
+                    </li>
+                  );
+                })
+              )}
             </ul>
           </div>
         </aside>
@@ -1841,11 +1904,11 @@ export default function ReaderPage() {
                   )}
                 </p>
               </div>
-              {selectedChapter && spineItems.length > 0 && (
+              {selectedChapter && totalPages > 0 && (
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handlePrevPage}
-                    disabled={currentSpineIndex === 0}
+                    disabled={currentPage <= 1}
                     className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                     title="上一页"
                   >
@@ -1853,12 +1916,12 @@ export default function ReaderPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                     </svg>
                   </button>
-                  <span className="text-sm text-slate-500 min-w-[60px] text-center">
-                    {currentSpineIndex + 1} / {spineItems.length}
+                  <span className="text-sm text-slate-500 min-w-[80px] text-center">
+                    {currentPage} / {totalPages}
                   </span>
                   <button
                     onClick={handleNextPage}
-                    disabled={currentSpineIndex >= spineItems.length - 1}
+                    disabled={currentPage >= totalPages}
                     className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                     title="下一页"
                   >
