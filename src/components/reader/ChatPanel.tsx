@@ -58,13 +58,6 @@ export default function ChatPanel({
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  // Auto scroll to bottom when messages change (only when not streaming)
-  useEffect(() => {
-    if (!aiLoading && chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    }
-  }, [messages, aiLoading]);
-
   const handleInputChange = (value: string) => {
     setInput(value);
     // Reset history index
@@ -415,19 +408,34 @@ function MessageContent({
           </p>
         ),
         h1: ({ children }) => (
-          <h1 className="text-xl font-bold mt-4 mb-3 text-[#2a2a2a]" style={{ fontFamily }}>
+          <h1 className="text-xl font-bold mt-4 mb-3 text-[#383838]" style={{ fontFamily }}>
             {children}
           </h1>
         ),
         h2: ({ children }) => (
-          <h2 className="text-lg font-bold mt-4 mb-2 text-[#2a2a2a]" style={{ fontFamily }}>
+          <h2 className="text-lg font-bold mt-4 mb-2 text-[#383838]" style={{ fontFamily }}>
             {children}
           </h2>
         ),
         h3: ({ children }) => (
-          <h3 className="text-base font-semibold mt-3 mb-2 text-[#2a2a2a]" style={{ fontFamily }}>
+          <h3 className="text-base font-semibold mt-3 mb-2 text-[#383838]" style={{ fontFamily }}>
             {children}
           </h3>
+        ),
+        h4: ({ children }) => (
+          <h4 className="text-base font-semibold mt-3 mb-2 text-[#383838]" style={{ fontFamily }}>
+            {children}
+          </h4>
+        ),
+        h5: ({ children }) => (
+          <h5 className="text-base font-semibold mt-3 mb-2 text-[#383838]" style={{ fontFamily }}>
+            {children}
+          </h5>
+        ),
+        h6: ({ children }) => (
+          <h6 className="text-base font-semibold mt-3 mb-2 text-[#383838]" style={{ fontFamily }}>
+            {children}
+          </h6>
         ),
         ul: ({ children }) => (
           <ul className="list-disc ml-5 mb-3 space-y-1">{children}</ul>
@@ -474,6 +482,7 @@ function MessageContent({
             {children}
           </a>
         ),
+        hr: () => <hr className="my-4 border-t border-slate-200" />,
       }}
     >
       {content}
