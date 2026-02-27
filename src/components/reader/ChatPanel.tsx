@@ -297,7 +297,7 @@ export default function ChatPanel({
                     <div className="text-xs text-slate-400 mb-1">
                       {msg.role === 'user' ? '你' : 'AI'}
                     </div>
-                    <div className="text-slate-800 px-2">
+                    <div className="text-[#3a3a3a] px-2">
                       {msg.role === 'assistant' ? (
                         <MessageContent
                           content={msg.blocks.map(b => b.content).join('\n\n')}
@@ -409,25 +409,71 @@ function MessageContent({
   return (
     <ReactMarkdown
       components={{
-        p: ({ children }) => <p className="mb-2" style={{ fontSize: `${fontSize}px`, fontFamily, lineHeight }}>{children}</p>,
-        ul: ({ children }) => <ul className="list-disc ml-4 mb-2">{children}</ul>,
-        ol: ({ children }) => <ol className="list-decimal ml-4 mb-2">{children}</ol>,
-        li: ({ children }) => <li className="mb-1">{children}</li>,
+        p: ({ children }) => (
+          <p className="mb-3" style={{ fontSize: `${fontSize}px`, fontFamily, lineHeight, color: '#3a3a3a' }}>
+            {children}
+          </p>
+        ),
+        h1: ({ children }) => (
+          <h1 className="text-xl font-bold mt-4 mb-3 text-[#2a2a2a]" style={{ fontFamily }}>
+            {children}
+          </h1>
+        ),
+        h2: ({ children }) => (
+          <h2 className="text-lg font-bold mt-4 mb-2 text-[#2a2a2a]" style={{ fontFamily }}>
+            {children}
+          </h2>
+        ),
+        h3: ({ children }) => (
+          <h3 className="text-base font-semibold mt-3 mb-2 text-[#2a2a2a]" style={{ fontFamily }}>
+            {children}
+          </h3>
+        ),
+        ul: ({ children }) => (
+          <ul className="list-disc ml-5 mb-3 space-y-1">{children}</ul>
+        ),
+        ol: ({ children }) => (
+          <ol className="list-decimal ml-5 mb-3 space-y-1">{children}</ol>
+        ),
+        li: ({ children }) => (
+          <li className="text-[#3a3a3a]" style={{ fontSize: `${fontSize}px`, fontFamily, lineHeight }}>
+            {children}
+          </li>
+        ),
         code: ({ className, children }) => {
           const isInline = !className;
           return isInline ? (
-            <code className="bg-slate-200 px-1 py-0.5 rounded text-xs">{children}</code>
+            <code className="bg-slate-100 text-pink-600 px-1.5 py-0.5 rounded text-sm font-mono">
+              {children}
+            </code>
           ) : (
-            <code className={`${className} block bg-slate-800 text-slate-100 p-2 rounded-lg overflow-x-auto mb-2 text-xs`}>
+            <code className={`${className} block bg-slate-800 text-slate-100 p-3 rounded-lg overflow-x-auto mb-3 text-sm`}>
               {children}
             </code>
           );
         },
-        pre: ({ children }) => <pre className="mb-2">{children}</pre>,
-        h1: ({ children }) => <h1 className="font-bold mt-2 mb-2">{children}</h1>,
-        h2: ({ children }) => <h2 className="font-bold mt-2 mb-2">{children}</h2>,
-        h3: ({ children }) => <h3 className="font-bold mt-2 mb-2">{children}</h3>,
-        blockquote: ({ children }) => <blockquote className="border-l-2 border-slate-300 pl-2 italic mb-2">{children}</blockquote>,
+        pre: ({ children }) => <pre className="mb-3">{children}</pre>,
+        blockquote: ({ children }) => (
+          <blockquote className="border-l-4 border-indigo-300 pl-3 py-1 my-3 bg-indigo-50 rounded-r text-[#4a4a4a] italic">
+            {children}
+          </blockquote>
+        ),
+        strong: ({ children }) => (
+          <strong className="font-bold text-[#2a2a2a]">{children}</strong>
+        ),
+        em: ({ children }) => (
+          <em className="italic text-[#4a4a4a]">{children}</em>
+        ),
+        a: ({ children, href }) => (
+          <a
+            href={href}
+            className="text-indigo-600 underline hover:text-indigo-800"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {children}
+          </a>
+        ),
       }}
     >
       {content}

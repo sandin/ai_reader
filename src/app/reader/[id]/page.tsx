@@ -89,6 +89,10 @@ export default function ReaderPage() {
   // Highlight refs
   const highlightRefs = useRef<Map<string, string>>(new Map());
 
+  // Panel layout state (loaded from localStorage)
+  const [tocLayout, setTocLayout] = useState<{ [key: string]: number } | null>(null);
+  const [rightLayout, setRightLayout] = useState<{ [key: string]: number } | null>(null);
+
   // Refs
   const viewerRef = useRef<HTMLDivElement>(null);
   const selectionHandlerAdded = useRef(false);
@@ -113,6 +117,16 @@ export default function ReaderPage() {
     if (savedHistory) {
       try {
         setInputHistory(JSON.parse(savedHistory));
+      } catch (e) { /* ignore */ }
+    }
+
+    // Load panel layout from localStorage
+    const savedLayout = localStorage.getItem('reader-layout');
+    if (savedLayout) {
+      try {
+        const layout = JSON.parse(savedLayout);
+        if (layout.toc) setTocLayout(layout.toc);
+        if (layout.right) setRightLayout(layout.right);
       } catch (e) { /* ignore */ }
     }
   }, []);
@@ -1134,11 +1148,26 @@ export default function ReaderPage() {
         onToggleToc={() => setShowToc(!showToc)}
       />
 
-      <PanelGroup className="flex-1 flex overflow-hidden">
+      <PanelGroup
+        className="flex-1 flex overflow-hidden"
+        defaultLayout={tocLayout || undefined}
+        onLayoutChanged={(sizes) => {
+          localStorage.setItem('reader-layout', JSON.stringify({
+            ...JSON.parse(localStorage.getItem('reader-layout') || '{}'),
+            toc: sizes
+          }));
+        }}
+      >
         {/* TOC Sidebar */}
         {showToc && (
           <>
-            <Panel defaultSize={400} minSize={50} maxSize={800} className="bg-white border-r border-slate-200 overflow-y-auto">
+            <Panel
+              id="toc"
+              defaultSize={400}
+              minSize={50}
+              maxSize={800}
+              className="bg-white border-r border-slate-200 overflow-y-auto"
+            >
               <TableOfContents
                 chapters={chapters}
                 tree={chapterIndex.tree}
@@ -1151,10 +1180,20 @@ export default function ReaderPage() {
         )}
 
         {/* Content Area with Right Sidebar */}
-        <Panel minSize={30} className="flex flex-col bg-white overflow-hidden">
-          <PanelGroup orientation="horizontal" className="flex flex-1 overflow-hidden">
+        <Panel id="content" minSize={30} className="flex flex-col bg-white overflow-hidden">
+          <PanelGroup
+            orientation="horizontal"
+            className="flex flex-1 overflow-hidden"
+            defaultLayout={rightLayout || undefined}
+            onLayoutChanged={(sizes) => {
+              localStorage.setItem('reader-layout', JSON.stringify({
+                ...JSON.parse(localStorage.getItem('reader-layout') || '{}'),
+                right: sizes
+              }));
+            }}
+          >
             {/* Main Content */}
-            <Panel minSize={30} className="flex flex-col bg-white overflow-hidden relative">
+            <Panel id="reader" minSize={30} className="flex flex-col bg-white overflow-hidden relative">
               <ContextMenu
                 visible={showContextMenu}
                 position={contextMenuPosition}
@@ -1235,7 +1274,12 @@ export default function ReaderPage() {
             <PanelResizeHandle className="w-1 bg-slate-200 hover:bg-indigo-400 transition-colors" />
 
             {/* Right Sidebar */}
-            <Panel defaultSize={400} minSize={50} className="bg-white border-l border-slate-200 flex flex-col">
+            <Panel
+              id="right"
+              defaultSize={400}
+              minSize={50}
+              className="bg-white border-l border-slate-200 flex flex-col"
+            >
               {/* Tab navigation */}
               <div className="border-b border-slate-100 flex">
                 <button
