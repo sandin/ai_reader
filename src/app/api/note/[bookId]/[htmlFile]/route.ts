@@ -199,7 +199,7 @@ export async function POST(
   try {
     const { bookId, htmlFile } = await params;
     const body = await request.json();
-    const { sessionId, title, selectedBlocks, messages, comments } = body;
+    const { sessionId, title, selectedBlocks, messages, comments, created_at } = body;
 
     if (!bookId || !htmlFile) {
       return NextResponse.json(
@@ -260,6 +260,7 @@ export async function POST(
           selectedBlocks: selectedBlocks || [],
           messages: messages || [],
           timestamp: Date.now(),
+          created_at: created_at || Date.now(),
         });
       }
     }

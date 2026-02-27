@@ -49,6 +49,7 @@ export default function ReaderPage() {
   // UI state
   const [showToc, setShowToc] = useState(true);
   const [autoScrollOnStreaming, setAutoScrollOnStreaming] = useState(false);
+  const [highlightEnabled, setHighlightEnabled] = useState(true);
   const [isContentReady, setIsContentReady] = useState(false);
   const [bookTitle, setBookTitle] = useState<string>('');
 
@@ -116,6 +117,14 @@ export default function ReaderPage() {
 
     const savedAutoScroll = localStorage.getItem('ai-chat-auto-scroll');
     if (savedAutoScroll === 'true') setAutoScrollOnStreaming(true);
+
+    const savedHighlightEnabled = localStorage.getItem('reader-highlight-enabled');
+    if (savedHighlightEnabled !== null) {
+      setHighlightEnabled(savedHighlightEnabled !== 'false');
+    } else {
+      // Default to true if not set
+      setHighlightEnabled(true);
+    }
 
     const savedHistory = localStorage.getItem('ai-chat-input-history');
     if (savedHistory) {
@@ -575,6 +584,7 @@ export default function ReaderPage() {
           selectedBlocks,
           messages: newMessages,
           timestamp: Date.now(),
+          created_at: Date.now(),
         };
         setSessions(prev => [...prev, newSession]);
       } else {
@@ -664,6 +674,7 @@ export default function ReaderPage() {
       selectedBlocks: [],
       messages: [],
       timestamp: Date.now(),
+      created_at: Date.now(),
     };
     setSessions(prev => [...prev, newSession]);
   }, [sessions.length]);
@@ -757,7 +768,7 @@ export default function ReaderPage() {
   }, [rendition]);
 
   const highlightBlock = useCallback((block: Block) => {
-    if (!rendition || !block.cfiRange) return;
+    if (!rendition || !block.cfiRange || !highlightEnabled) return;
     if (highlightRefs.current.has(block.id)) {
       try { rendition.annotations.remove(block.cfiRange, 'highlight'); } catch (e) { /* ignore */ }
     }
@@ -765,12 +776,26 @@ export default function ReaderPage() {
       rendition.annotations.highlight(block.cfiRange, {}, () => {});
       highlightRefs.current.set(block.id, block.cfiRange);
     } catch (e) { /* ignore */ }
-  }, [rendition]);
+  }, [rendition, highlightEnabled]);
 
   const refreshHighlights = useCallback((blocks: Block[]) => {
-    clearHighlights();
+    if (!highlightEnabled) {
+      clearHighlights();
+      return;
+    }
     blocks.forEach(block => highlightBlock(block));
-  }, [clearHighlights, highlightBlock]);
+  }, [clearHighlights, highlightBlock, highlightEnabled]);
+
+  // Handle highlight enabled toggle (when switching sessions or when highlightEnabled changes)
+  useEffect(() => {
+    if (!rendition) return;
+
+    if (highlightEnabled) {
+      refreshHighlights(selectedBlocks);
+    } else {
+      clearHighlights();
+    }
+  }, [highlightEnabled]);
 
   // ==================== Blocks ====================
 
@@ -799,6 +824,18 @@ export default function ReaderPage() {
     }
   }, [selectedBlocks, rendition, currentSessionId, messages]);
 
+  const handleDeleteMessage = useCallback(async (messageId: string) => {
+    const newMessages = messages.filter(msg => msg.id !== messageId);
+    setMessages(newMessages);
+
+    if (currentSessionId) {
+      setSessions(prev => prev.map(s =>
+        s.id === currentSessionId ? { ...s, messages: newMessages, timestamp: Date.now() } : s
+      ));
+      await saveCurrentSession(newMessages, selectedBlocks);
+    }
+  }, [messages, currentSessionId, selectedBlocks]);
+
   const handleToggleExpandBlock = useCallback((id: string) => {
     setExpandedBlocks(prev => {
       const next = new Set(prev);
@@ -825,9 +862,10 @@ export default function ReaderPage() {
             selectedBlocks: s.selectedBlocks || [],
             messages: s.messages || [],
             timestamp: s.timestamp,
+            created_at: s.created_at || s.timestamp || Date.now(),
           }));
           setSessions(loadedSessions);
-          const mostRecent = loadedSessions.sort((a: any, b: any) => b.timestamp - a.timestamp)[0];
+          const mostRecent = loadedSessions.sort((a: any, b: any) => b.created_at - a.created_at)[0];
           setCurrentSessionId(mostRecent.id);
           setMessages(mostRecent.messages || []);
           setSelectedBlocks(mostRecent.selectedBlocks || []);
@@ -872,6 +910,7 @@ export default function ReaderPage() {
     const blocksToUse = blocks ?? selectedBlocks;
     const currentSession = sessions.find(s => s.id === currentSessionId);
     const title = currentSession?.title || '';
+    const created_at = currentSession?.created_at || Date.now();
 
     try {
       const htmlFile = currentChapter.split('#')[0];
@@ -884,6 +923,7 @@ export default function ReaderPage() {
           title,
           selectedBlocks: blocksToUse,
           messages: messagesToUse,
+          created_at,
         }),
       });
     } catch (err) {
@@ -963,6 +1003,7 @@ export default function ReaderPage() {
         selectedBlocks: newSelectedBlocks,
         messages: [],
         timestamp: Date.now(),
+        created_at: Date.now(),
       };
       setSessions(prev => [...prev, newSession]);
     }
@@ -1000,7 +1041,7 @@ export default function ReaderPage() {
     setCurrentSessionId(newSessionId);
     setMessages([]);
     setSelectedBlocks(newSelectedBlocks);
-    highlightBlock(newBlock);
+    refreshHighlights(newSelectedBlocks);
 
     const newSession: Session = {
       id: newSessionId,
@@ -1008,6 +1049,7 @@ export default function ReaderPage() {
       selectedBlocks: newSelectedBlocks,
       messages: [],
       timestamp: Date.now(),
+      created_at: Date.now(),
     };
 
     setSessions(prev => [...prev, newSession]);
@@ -1147,6 +1189,7 @@ export default function ReaderPage() {
         lineHeight={lineHeight}
         showToc={showToc}
         autoScrollOnStreaming={autoScrollOnStreaming}
+        highlightEnabled={highlightEnabled}
         onFontSizeChange={(size) => setFontSize(Math.min(32, Math.max(14, size)))}
         onFontFamilyChange={setFontFamily}
         onLineHeightChange={setLineHeight}
@@ -1155,6 +1198,11 @@ export default function ReaderPage() {
           const newValue = !autoScrollOnStreaming;
           setAutoScrollOnStreaming(newValue);
           localStorage.setItem('ai-chat-auto-scroll', String(newValue));
+        }}
+        onToggleHighlight={() => {
+          const newValue = !highlightEnabled;
+          setHighlightEnabled(newValue);
+          localStorage.setItem('reader-highlight-enabled', String(newValue));
         }}
       />
 
@@ -1341,6 +1389,7 @@ export default function ReaderPage() {
                   onDeleteSession={deleteSession}
                   onEditSession={handleEditSession}
                   onRemoveBlock={handleRemoveBlock}
+                  onDeleteMessage={handleDeleteMessage}
                   onToggleExpandBlock={handleToggleExpandBlock}
                   onToggleSelectedBlocksExpand={() => setIsSelectedBlocksExpanded(!isSelectedBlocksExpanded)}
                 />

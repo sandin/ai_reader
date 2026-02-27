@@ -10,11 +10,13 @@ interface ReaderHeaderProps {
   lineHeight: number;
   showToc: boolean;
   autoScrollOnStreaming: boolean;
+  highlightEnabled: boolean;
   onFontSizeChange: (size: number) => void;
   onFontFamilyChange: (family: string) => void;
   onLineHeightChange: (height: number) => void;
   onToggleToc: () => void;
   onToggleAutoScroll: () => void;
+  onToggleHighlight: () => void;
 }
 
 export default function ReaderHeader({
@@ -24,11 +26,13 @@ export default function ReaderHeader({
   lineHeight,
   showToc,
   autoScrollOnStreaming,
+  highlightEnabled,
   onFontSizeChange,
   onFontFamilyChange,
   onLineHeightChange,
   onToggleToc,
   onToggleAutoScroll,
+  onToggleHighlight,
 }: ReaderHeaderProps) {
   const handleFontSizeDecrease = () => onFontSizeChange(fontSize - 1);
   const handleFontSizeIncrease = () => onFontSizeChange(fontSize + 1);
@@ -149,6 +153,25 @@ export default function ReaderHeader({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
             </svg>
             滚动
+          </button>
+
+          {/* Divider */}
+          <div className="w-px h-6 bg-slate-300 mx-1"></div>
+
+          {/* Highlight toggle */}
+          <button
+            onClick={onToggleHighlight}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-colors ${
+              highlightEnabled
+                ? 'bg-indigo-100 text-indigo-700'
+                : 'bg-white text-slate-500 hover:bg-slate-50'
+            }`}
+            title={highlightEnabled ? '高亮已开启' : '高亮已关闭'}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+            高亮
           </button>
         </div>
 

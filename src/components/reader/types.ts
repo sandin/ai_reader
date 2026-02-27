@@ -40,6 +40,7 @@ export interface Session {
   selectedBlocks: Block[];
   messages: Message[];
   timestamp: number;
+  created_at: number;
 }
 
 export interface Comment {
