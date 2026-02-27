@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { Panel, Group as PanelGroup, Separator } from 'react-resizable-panels';
 import { Block, Message, Session } from './types';
 
 interface ChatPanelProps {
@@ -164,214 +165,218 @@ export default function ChatPanel({
   }, []);
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Session tabs */}
-      {sessions.length > 0 && (
-        <div className="border-b border-slate-100 overflow-x-auto">
-          <div className="flex gap-1 px-2 py-2 min-w-max">
-            {sessions.slice().sort((a, b) => a.timestamp - b.timestamp).map((session) => (
-              <div
-                key={session.id}
-                className={`flex items-center gap-1 pr-1 rounded-lg text-xs whitespace-nowrap transition-colors ${
-                  currentSessionId === session.id
-                    ? 'bg-indigo-100 text-indigo-700'
-                    : 'bg-slate-100 text-slate-600'
-                }`}
-              >
-                <button
-                  onClick={() => onSwitchSession(session.id)}
-                  className="px-2 py-1.5 hover:opacity-70 transition-opacity"
-                >
-                  {session.title}
-                </button>
-                <button
-                  onClick={() => onEditSession(session.id)}
-                  className="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 transition-colors"
-                  title="重命名"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                </button>
-                <button
-                  onClick={(e) => onDeleteSession(session.id, e)}
-                  className="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                  title="删除对话"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Selected text blocks */}
-      {selectedBlocks.length > 0 && (
-        <div className="border-b border-slate-100 bg-slate-50">
-          <button
-            onClick={onToggleSelectedBlocksExpand}
-            className="flex items-center justify-between w-full px-4 py-2"
-          >
-            <h3 className="text-sm font-medium text-slate-700">选中的文字 ({selectedBlocks.length})</h3>
-            <svg
-              className={`w-4 h-4 text-slate-400 transition-transform ${isSelectedBlocksExpanded ? 'rotate-180' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          {isSelectedBlocksExpanded && (
-            <div className="px-4 pb-4 space-y-2 overflow-y-auto">
-              {selectedBlocks.map((block) => {
-                const isExpanded = expandedBlocks.has(block.id);
-                const shouldTruncate = block.content.length > 200;
-                const displayContent = !isExpanded && shouldTruncate
-                  ? block.content.slice(0, 200) + '...'
-                  : block.content;
-
-                return (
+    <PanelGroup orientation="vertical" className="h-full">
+      {/* Messages panel - flexible height */}
+      <Panel defaultSize={80} minSize={30}>
+        <div className="flex flex-col h-full">
+          {/* Session tabs */}
+          {sessions.length > 0 && (
+            <div className="border-b border-slate-100 overflow-x-auto shrink-0">
+              <div className="flex gap-1 px-2 py-2 min-w-max">
+                {sessions.slice().sort((a, b) => a.timestamp - b.timestamp).map((session) => (
                   <div
-                    key={block.id}
-                    className="relative bg-white border border-slate-200 rounded-lg p-3 text-sm text-slate-700 hover:border-indigo-300 transition-colors"
+                    key={session.id}
+                    className={`flex items-center gap-1 pr-1 rounded-lg text-xs whitespace-nowrap transition-colors ${
+                      currentSessionId === session.id
+                        ? 'bg-indigo-100 text-indigo-700'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
                   >
-                    <p className="whitespace-pre-wrap break-words">{displayContent}</p>
-                    <div className="absolute top-2 right-2 flex items-center gap-1">
-                      {shouldTruncate && (
-                        <button
-                          onClick={() => onToggleExpandBlock(block.id)}
-                          className="w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-indigo-500 hover:bg-indigo-50"
-                          title={isExpanded ? '收起' : '展开'}
-                        >
-                          <svg className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-                      )}
-                      <button
-                        onClick={() => onRemoveBlock(block.id)}
-                        className="w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50"
-                        title="删除"
+                    <button
+                      onClick={() => onSwitchSession(session.id)}
+                      className="px-2 py-1.5 hover:opacity-70 transition-opacity"
+                    >
+                      {session.title}
+                    </button>
+                    <button
+                      onClick={() => onEditSession(session.id)}
+                      className="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 transition-colors"
+                      title="重命名"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={(e) => onDeleteSession(session.id, e)}
+                      className="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                      title="删除对话"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Selected text blocks */}
+          {selectedBlocks.length > 0 && (
+            <div className="border-b border-slate-100 bg-slate-50 shrink-0">
+              <button
+                onClick={onToggleSelectedBlocksExpand}
+                className="flex items-center justify-between w-full px-4 py-2"
+              >
+                <h3 className="text-sm font-medium text-slate-700">选中的文字 ({selectedBlocks.length})</h3>
+                <svg
+                  className={`w-4 h-4 text-slate-400 transition-transform ${isSelectedBlocksExpanded ? 'rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {isSelectedBlocksExpanded && (
+                <div className="px-4 pb-4 space-y-2 overflow-y-auto max-h-40">
+                  {selectedBlocks.map((block) => {
+                    const isExpanded = expandedBlocks.has(block.id);
+                    const shouldTruncate = block.content.length > 200;
+                    const displayContent = !isExpanded && shouldTruncate
+                      ? block.content.slice(0, 200) + '...'
+                      : block.content;
+
+                    return (
+                      <div
+                        key={block.id}
+                        className="relative bg-white border border-slate-200 rounded-lg p-3 text-sm text-slate-700 hover:border-indigo-300 transition-colors"
                       >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
+                        <p className="whitespace-pre-wrap break-words">{displayContent}</p>
+                        <div className="absolute top-2 right-2 flex items-center gap-1">
+                          {shouldTruncate && (
+                            <button
+                              onClick={() => onToggleExpandBlock(block.id)}
+                              className="w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-indigo-500 hover:bg-indigo-50"
+                              title={isExpanded ? '收起' : '展开'}
+                            >
+                              <svg className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                              </svg>
+                            </button>
+                          )}
+                          <button
+                            onClick={() => onRemoveBlock(block.id)}
+                            className="w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50"
+                            title="删除"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Messages */}
+          <div
+            ref={chatContainerRef}
+            className={`flex-1 overflow-y-auto p-4 space-y-4 ${selectedBlocks.length > 0 ? 'min-h-0' : ''}`}
+          >
+            {messages.length === 0 && selectedBlocks.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-center">
+                <div className="w-16 h-16 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-full flex items-center justify-center mb-4">
+                  <svg className="w-8 h-8 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                </div>
+                <p className="text-sm text-slate-500 mb-1">选择一段文字，</p>
+                <p className="text-sm text-slate-500">向 AI 提问关于内容的问题</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {messages.map((msg, index) => (
+                  <div key={msg.id}>
+                    {/* Role indicator */}
+                    <div className="text-xs text-slate-400 mb-1">
+                      {msg.role === 'user' ? '你' : 'AI'}
+                    </div>
+                    <div className="text-slate-800 px-2">
+                      {msg.role === 'assistant' ? (
+                        <MessageContent
+                          content={msg.blocks.map(b => b.content).join('\n\n')}
+                          isStreaming={aiLoading && index === messages.length - 1}
+                          fontSize={fontSize}
+                          fontFamily={fontFamily}
+                          lineHeight={lineHeight}
+                        />
+                      ) : (
+                        <UserMessageContent content={msg.blocks.map(b => b.content).join('\n\n')} index={index} />
+                      )}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Messages */}
-      <div
-        ref={chatContainerRef}
-        className={`flex-1 overflow-y-auto p-4 space-y-4 ${selectedBlocks.length > 0 ? 'min-h-0' : ''}`}
-      >
-        {messages.length === 0 && selectedBlocks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-16 h-16 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-full flex items-center justify-center mb-4">
-              <svg className="w-8 h-8 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
-            </div>
-            <p className="text-sm text-slate-500 mb-1">选择一段文字，</p>
-            <p className="text-sm text-slate-500">向 AI 提问关于内容的问题</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {messages.map((msg, index) => (
-              <div key={msg.id}>
-                {/* Role indicator */}
-                <div className="text-xs text-slate-400 mb-1">
-                  {msg.role === 'user' ? '你' : 'AI'}
-                </div>
-                <div className="text-slate-800 px-2">
-                  {msg.role === 'assistant' ? (
-                    <MessageContent
-                      content={msg.blocks.map(b => b.content).join('\n\n')}
-                      isStreaming={aiLoading && index === messages.length - 1}
-                      fontSize={fontSize}
-                      fontFamily={fontFamily}
-                      lineHeight={lineHeight}
-                    />
-                  ) : (
-                    <UserMessageContent content={msg.blocks.map(b => b.content).join('\n\n')} index={index} />
-                  )}
-                </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </div>
-
-      {/* Input area */}
-      <div className="min-h-[120px] p-4 border-t border-slate-100 bg-slate-50 shrink-0">
-        <div className="flex gap-2 items-end relative">
-          <button
-            onClick={onCreateSession}
-            className="p-2.5 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition-colors shrink-0"
-            title="新建对话"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-          </button>
-          <textarea
-            ref={(el) => {
-              if (el) {
-                el.style.height = 'auto';
-                el.style.height = Math.min(el.scrollHeight, 120) + 'px';
-              }
-            }}
-            value={input}
-            onChange={(e) => handleInputChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="输入问题..."
-            className="flex-1 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow resize-none overflow-hidden"
-            disabled={aiLoading}
-            rows={1}
-          />
-          {/* Auto-complete suggestions */}
-          {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute bottom-full left-0 right-14 mb-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto z-10">
-              {suggestions.map((suggestion, index) => (
-                <div
-                  key={index}
-                  className={`px-3 py-2 text-sm cursor-pointer truncate ${
-                    index === selectedSuggestionIndex
-                      ? 'bg-indigo-50 text-indigo-600'
-                      : 'hover:bg-slate-50'
-                  }`}
-                  onClick={() => {
-                    setInput(suggestion);
-                    setShowSuggestions(false);
-                  }}
-                >
-                  {suggestion}
-                </div>
-              ))}
-            </div>
-          )}
-          <button
-            onClick={handleSubmit}
-            disabled={aiLoading || !input.trim()}
-            className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl text-sm font-medium hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow shrink-0"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-            </svg>
-          </button>
         </div>
-      </div>
-    </div>
+      </Panel>
+
+      {/* Resize handle */}
+      <Separator className="h-1 bg-slate-200 hover:bg-indigo-400 transition-colors cursor-row-resize" />
+
+      {/* Input panel - default 120px, no max */}
+      <Panel defaultSize={10} minSize={80}>
+        <div className="h-full flex flex-col p-4 border-t border-slate-100 bg-slate-50">
+          <div className="flex gap-2 items-stretch flex-1 min-h-0">
+            <button
+              onClick={onCreateSession}
+              className="p-2.5 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition-colors shrink-0 self-end"
+              title="新建对话"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+            <textarea
+              value={input}
+              onChange={(e) => handleInputChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="输入问题..."
+              className="flex-1 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow resize-none overflow-y-auto"
+              disabled={aiLoading}
+              rows={1}
+            />
+            {/* Auto-complete suggestions */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute bottom-full left-0 right-14 mb-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto z-10">
+                {suggestions.map((suggestion, index) => (
+                  <div
+                    key={index}
+                    className={`px-3 py-2 text-sm cursor-pointer truncate ${
+                      index === selectedSuggestionIndex
+                        ? 'bg-indigo-50 text-indigo-600'
+                        : 'hover:bg-slate-50'
+                    }`}
+                    onClick={() => {
+                      setInput(suggestion);
+                      setShowSuggestions(false);
+                    }}
+                  >
+                    {suggestion}
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={handleSubmit}
+              disabled={aiLoading || !input.trim()}
+              className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl text-sm font-medium hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow shrink-0 self-end"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </Panel>
+    </PanelGroup>
   );
 }
 
