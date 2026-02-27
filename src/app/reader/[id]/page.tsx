@@ -536,7 +536,7 @@ export default function ReaderPage() {
     let userContent = input;
     if (isFirstMessage && selectedBlocks.length > 0) {
       const selectedText = selectedBlocks.map(b => b.content).join('\n\n');
-      userContent = `选中文本：\n${selectedText}\n\n用户提问：${input}`;
+      userContent = `选中文本：\n${selectedText}\n\n用户输入：${input}`;
     }
 
     const userMessage: Message = {

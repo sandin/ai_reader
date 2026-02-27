@@ -1,15 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ChatOpenAI } from '@langchain/openai';
-import { HumanMessage, AIMessage, BaseMessage, SystemMessage } from '@langchain/core/messages';
-
-// 动态导入 LangChainTracer
-let LangChainTracer: any;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-require
-  LangChainTracer = require('@langchain/core/tracers').LangChainTracer;
-} catch (e) {
-  console.warn('LangChainTracer not available:', e);
-}
+import { streamChat, parseUserMessage, classifyIntent, INTENT_PROMPTS, Intent } from '../agent';
 
 export async function POST(req: NextRequest) {
   try {
@@ -25,58 +15,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 构建系统提示词
-    const systemPrompt = `你是一个阅读助手，专门帮助用户理解和分析电子书中的内容。请根据用户提供的选中文本回答问题。
+    // 解析用户消息
+    const { selectedText, input } = parseUserMessage(message);
 
-用户可能会：
-1. 询问关于选中文本的理解
-2. 让您解释某个概念
-3. 让您总结某些内容
-4. 提出与文本相关的问题
+    // 分类用户意图
+    const intent: Intent = await classifyIntent(input, apiKey, modelName);
 
-请根据提供的文本内容给出准确、有帮助的回答。`;
+    // 根据意图选择 system prompt
+    const systemPrompt = INTENT_PROMPTS[intent];
 
-    // 用户消息已经包含选中的文字（在前端处理）
-    const userContent = message;
-
-    // 创建 LangChain tracer 用于 LangSmith 追踪
-    const callbacks: any[] = [];
-
-    if (LangChainTracer && process.env.LANGSMITH_API_KEY) {
-      const tracer = new LangChainTracer({
-        projectName: process.env.LANGCHAIN_PROJECT || 'ai-reader',
-      });
-      callbacks.push(tracer);
-    }
-
-    // 使用 langchain 调用 LLM
-    const chat = new ChatOpenAI(modelName, {
-      temperature: 0.7,
-      maxTokens: 2000,
-      apiKey: apiKey,
-      configuration: {
-        baseURL: 'https://api.deepseek.com',
-      },
-    });
-
-    // 构建消息数组 - 使用 LangChain 消息类
-    const messages: BaseMessage[] = [
-      new SystemMessage(systemPrompt),
-    ];
-
-    // 添加历史消息（按顺序：user -> assistant -> user -> assistant...）
-    if (history && history.length > 0) {
-      history.forEach((msg: { role: string; content: string }) => {
-        if (msg.role === 'user') {
-          messages.push(new HumanMessage(msg.content));
-        } else if (msg.role === 'assistant') {
-          messages.push(new AIMessage(msg.content));
-        }
-      });
-    }
-
-    // 添加当前用户消息
-    messages.push(new HumanMessage(userContent));
+    // 构建完整的消息内容
+    const userContent = selectedText
+      ? `选中文本：\n${selectedText}\n\n用户输入：${input}`
+      : input;
 
     // 使用流式响应
     const encoder = new TextEncoder();
@@ -84,13 +35,16 @@ export async function POST(req: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          // 使用 stream 方法进行流式输出
-          const streamIterable = await chat.stream(messages, { callbacks });
-
-          for await (const chunk of streamIterable) {
-            const content = chunk.content;
-            if (content) {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+          // 使用 agent 模块进行流式输出，传入 systemPrompt
+          for await (const chunk of streamChat({
+            message: userContent,
+            history,
+            apiKey,
+            modelName,
+            systemPrompt,
+          })) {
+            if (chunk.content) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: chunk.content })}\n\n`));
             }
           }
 

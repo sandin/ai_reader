@@ -573,13 +573,12 @@ function MessageContent({
   );
 }
 
-// User message content component - shows only content after "用户提问：" for first message
+// User message content component - shows only content after "用户输入：" for first message
 function UserMessageContent({ content, index }: { content: string; index: number }) {
   const isFirstUserMessage = index === 0;
   let text = content;
   if (isFirstUserMessage) {
-    // Extract content after "用户提问："
-    const match = content.match(/用户提问：([\s\S]*)/);
+    const match = content.match(/用户输入：([\s\S]*)/);
     text = match ? match[1] : content;
   }
   return <div className="whitespace-pre-wrap">{text}</div>;
