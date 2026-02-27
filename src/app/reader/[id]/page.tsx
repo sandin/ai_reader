@@ -48,6 +48,7 @@ export default function ReaderPage() {
 
   // UI state
   const [showToc, setShowToc] = useState(true);
+  const [autoScrollOnStreaming, setAutoScrollOnStreaming] = useState(false);
   const [isContentReady, setIsContentReady] = useState(false);
   const [bookTitle, setBookTitle] = useState<string>('');
 
@@ -112,6 +113,9 @@ export default function ReaderPage() {
 
     const savedLineHeight = localStorage.getItem('reader-line-height');
     if (savedLineHeight) setLineHeight(parseFloat(savedLineHeight));
+
+    const savedAutoScroll = localStorage.getItem('ai-chat-auto-scroll');
+    if (savedAutoScroll === 'true') setAutoScrollOnStreaming(true);
 
     const savedHistory = localStorage.getItem('ai-chat-input-history');
     if (savedHistory) {
@@ -1142,10 +1146,16 @@ export default function ReaderPage() {
         fontFamily={fontFamily}
         lineHeight={lineHeight}
         showToc={showToc}
+        autoScrollOnStreaming={autoScrollOnStreaming}
         onFontSizeChange={(size) => setFontSize(Math.min(32, Math.max(14, size)))}
         onFontFamilyChange={setFontFamily}
         onLineHeightChange={setLineHeight}
         onToggleToc={() => setShowToc(!showToc)}
+        onToggleAutoScroll={() => {
+          const newValue = !autoScrollOnStreaming;
+          setAutoScrollOnStreaming(newValue);
+          localStorage.setItem('ai-chat-auto-scroll', String(newValue));
+        }}
       />
 
       <PanelGroup
@@ -1324,6 +1334,7 @@ export default function ReaderPage() {
                   fontSize={fontSize}
                   fontFamily={fontFamily}
                   lineHeight={lineHeight}
+                  autoScrollOnStreaming={autoScrollOnStreaming}
                   onSendMessage={(input, isFirst) => handleSendMessage(input, isFirst)}
                   onSwitchSession={switchToSession}
                   onCreateSession={createNewSession}

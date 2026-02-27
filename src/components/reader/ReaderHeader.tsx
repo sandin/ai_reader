@@ -9,10 +9,12 @@ interface ReaderHeaderProps {
   fontFamily: string;
   lineHeight: number;
   showToc: boolean;
+  autoScrollOnStreaming: boolean;
   onFontSizeChange: (size: number) => void;
   onFontFamilyChange: (family: string) => void;
   onLineHeightChange: (height: number) => void;
   onToggleToc: () => void;
+  onToggleAutoScroll: () => void;
 }
 
 export default function ReaderHeader({
@@ -21,13 +23,15 @@ export default function ReaderHeader({
   fontFamily,
   lineHeight,
   showToc,
+  autoScrollOnStreaming,
   onFontSizeChange,
   onFontFamilyChange,
   onLineHeightChange,
   onToggleToc,
+  onToggleAutoScroll,
 }: ReaderHeaderProps) {
-  const handleFontSizeDecrease = () => onFontSizeChange(fontSize - 2);
-  const handleFontSizeIncrease = () => onFontSizeChange(fontSize + 2);
+  const handleFontSizeDecrease = () => onFontSizeChange(fontSize - 1);
+  const handleFontSizeIncrease = () => onFontSizeChange(fontSize + 1);
 
   const handleLineHeightDecrease = () => {
     const newHeight = Math.max(1.2, lineHeight - 0.2);
@@ -64,7 +68,7 @@ export default function ReaderHeader({
       </div>
 
       <div className="flex items-center gap-3">
-        {/* Font settings */}
+        {/* 工具栏 */}
         <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1">
           {/* Font size controls */}
           <button
@@ -126,6 +130,25 @@ export default function ReaderHeader({
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
+          </button>
+
+          {/* Divider */}
+          <div className="w-px h-6 bg-slate-300 mx-1"></div>
+
+          {/* Auto-scroll toggle */}
+          <button
+            onClick={onToggleAutoScroll}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-colors ${
+              autoScrollOnStreaming
+                ? 'bg-indigo-100 text-indigo-700'
+                : 'bg-white text-slate-500 hover:bg-slate-50'
+            }`}
+            title={autoScrollOnStreaming ? '流式输出时自动滚动已开启' : '流式输出时自动滚动已关闭'}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+            </svg>
+            滚动
           </button>
         </div>
 

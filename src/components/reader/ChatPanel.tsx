@@ -18,6 +18,8 @@ interface ChatPanelProps {
   fontSize?: number;
   fontFamily?: string;
   lineHeight?: number;
+  // Auto-scroll setting
+  autoScrollOnStreaming: boolean;
   // Callbacks
   onSendMessage: (input: string, isFirstMessage: boolean) => void;
   onSwitchSession: (sessionId: string) => void;
@@ -41,6 +43,7 @@ export default function ChatPanel({
   fontSize = 18,
   fontFamily = 'Georgia, serif',
   lineHeight = 1.8,
+  autoScrollOnStreaming,
   onSendMessage,
   onSwitchSession,
   onCreateSession,
@@ -57,6 +60,13 @@ export default function ChatPanel({
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Handle auto-scroll during streaming
+  useEffect(() => {
+    if (autoScrollOnStreaming && aiLoading && chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [messages, aiLoading, autoScrollOnStreaming]);
 
   const handleInputChange = (value: string) => {
     setInput(value);
