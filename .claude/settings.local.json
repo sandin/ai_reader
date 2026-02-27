@@ -12,7 +12,8 @@
       "Bash(npm run lint)",
       "Bash(git checkout -- src/app/reader/[id]/page.tsx)",
       "Bash(wc -l f:/lds/project/ai_reader/ai_reader/src/app/reader/[id]/page.tsx)",
-      "Bash(npm show react-resizable-panels)"
+      "Bash(npm show react-resizable-panels)",
+      "Bash(npm install remark-gfm)"
     ]
   }
 }

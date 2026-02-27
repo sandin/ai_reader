@@ -94,6 +94,7 @@ export default function ReaderPage() {
   // Panel layout state (loaded from localStorage)
   const [tocLayout, setTocLayout] = useState<{ [key: string]: number } | null>(null);
   const [rightLayout, setRightLayout] = useState<{ [key: string]: number } | null>(null);
+  const [chatInputLayout, setChatInputLayout] = useState<{ [key: string]: number } | null>(null);
 
   // Refs
   const viewerRef = useRef<HTMLDivElement>(null);
@@ -140,6 +141,7 @@ export default function ReaderPage() {
         const layout = JSON.parse(savedLayout);
         if (layout.toc) setTocLayout(layout.toc);
         if (layout.right) setRightLayout(layout.right);
+        if (layout.chatInput) setChatInputLayout(layout.chatInput);
       } catch (e) { /* ignore */ }
     }
   }, []);
@@ -1379,6 +1381,7 @@ export default function ReaderPage() {
                   isSelectedBlocksExpanded={isSelectedBlocksExpanded}
                   aiLoading={aiLoading}
                   inputHistory={inputHistory}
+                  inputLayout={chatInputLayout || undefined}
                   fontSize={fontSize}
                   fontFamily={fontFamily}
                   lineHeight={lineHeight}
@@ -1392,6 +1395,13 @@ export default function ReaderPage() {
                   onDeleteMessage={handleDeleteMessage}
                   onToggleExpandBlock={handleToggleExpandBlock}
                   onToggleSelectedBlocksExpand={() => setIsSelectedBlocksExpanded(!isSelectedBlocksExpanded)}
+                  onInputLayoutChange={(sizes) => {
+                    localStorage.setItem('reader-layout', JSON.stringify({
+                      ...JSON.parse(localStorage.getItem('reader-layout') || '{}'),
+                      chatInput: sizes
+                    }));
+                    setChatInputLayout(sizes);
+                  }}
                 />
               )}
 

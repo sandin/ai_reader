@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Panel, Group as PanelGroup, Separator } from 'react-resizable-panels';
 import { Block, Message, Session } from './types';
 
@@ -14,6 +15,8 @@ interface ChatPanelProps {
   isSelectedBlocksExpanded: boolean;
   aiLoading: boolean;
   inputHistory: string[];
+  // Input layout from localStorage
+  inputLayout?: { [key: string]: number };
   // Reader style
   fontSize?: number;
   fontFamily?: string;
@@ -30,6 +33,7 @@ interface ChatPanelProps {
   onDeleteMessage: (messageId: string) => void;
   onToggleExpandBlock: (id: string) => void;
   onToggleSelectedBlocksExpand: () => void;
+  onInputLayoutChange?: (sizes: { [key: string]: number }) => void;
 }
 
 export default function ChatPanel({
@@ -41,6 +45,7 @@ export default function ChatPanel({
   isSelectedBlocksExpanded,
   aiLoading,
   inputHistory,
+  inputLayout,
   fontSize = 18,
   fontFamily = 'Georgia, serif',
   lineHeight = 1.8,
@@ -54,6 +59,7 @@ export default function ChatPanel({
   onDeleteMessage,
   onToggleExpandBlock,
   onToggleSelectedBlocksExpand,
+  onInputLayoutChange,
 }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -173,9 +179,16 @@ export default function ChatPanel({
   }, []);
 
   return (
-    <PanelGroup orientation="vertical" className="h-full">
+    <PanelGroup
+      orientation="vertical"
+      className="h-full"
+      defaultLayout={inputLayout as unknown as { [key: string]: number } | undefined}
+      onLayoutChanged={(sizes) => {
+        onInputLayoutChange?.(sizes as unknown as { [key: string]: number });
+      }}
+    >
       {/* Messages panel - flexible height */}
-      <Panel defaultSize={80} minSize={30}>
+      <Panel id="messages" defaultSize={80} minSize={30}>
         <div className="flex flex-col h-full">
           {/* Session tabs */}
           {sessions.length > 0 && (
@@ -365,7 +378,7 @@ export default function ChatPanel({
       <Separator className="h-1 bg-slate-200 hover:bg-indigo-400 transition-colors cursor-row-resize" />
 
       {/* Input panel - default 120px, no max */}
-      <Panel defaultSize={10} minSize={80}>
+      <Panel id="input" defaultSize={10} minSize={80}>
         <div className="h-full flex flex-col p-4 border-t border-slate-100 bg-slate-50">
           <div className="flex gap-2 items-stretch flex-1 min-h-0">
             <button
@@ -484,6 +497,7 @@ function MessageContent({
 
   return (
     <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
       components={{
         p: ({ children }) => (
           <p className="mb-3" style={{ fontSize: `${fontSize}px`, fontFamily, lineHeight, color: '#3a3a3a' }}>
@@ -566,6 +580,28 @@ function MessageContent({
           </a>
         ),
         hr: () => <hr className="my-4 border-t border-slate-200" />,
+        table: ({ children }) => (
+          <div className="overflow-x-auto mb-3">
+            <table className="min-w-full border border-slate-200 rounded-lg overflow-hidden">{children}</table>
+          </div>
+        ),
+        thead: ({ children }) => (
+          <thead className="bg-slate-50">{children}</thead>
+        ),
+        tbody: ({ children }) => (
+          <tbody className="divide-y divide-slate-100">{children}</tbody>
+        ),
+        tr: ({ children }) => (
+          <tr className="hover:bg-slate-50/50 transition-colors">{children}</tr>
+        ),
+        th: ({ children }) => (
+          <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider bg-slate-50">
+            {children}
+          </th>
+        ),
+        td: ({ children }) => (
+          <td className="px-4 py-2.5 text-sm text-slate-700">{children}</td>
+        ),
       }}
     >
       {content}
