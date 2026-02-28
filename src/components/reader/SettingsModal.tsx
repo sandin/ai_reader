@@ -127,8 +127,8 @@ export default function SettingsModal({
 
   const handleFontSizeDecrease = () => onFontSizeChange(fontSize - 1);
   const handleFontSizeIncrease = () => onFontSizeChange(fontSize + 1);
-  const handleLineHeightDecrease = () => onLineHeightChange(Math.max(1.2, lineHeight - 0.2));
-  const handleLineHeightIncrease = () => onLineHeightChange(Math.min(3.0, lineHeight + 0.2));
+  const handleLineHeightDecrease = () => onLineHeightChange(Math.round(Math.max(1.2, lineHeight - 0.1) * 10) / 10);
+  const handleLineHeightIncrease = () => onLineHeightChange(Math.round(Math.min(3.0, lineHeight + 0.1) * 10) / 10);
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
@@ -245,7 +245,7 @@ export default function SettingsModal({
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
                     </svg>
                   </button>
-                  <span className="text-sm text-slate-600 w-10 text-center">{lineHeight}</span>
+                  <span className="text-sm text-slate-600 w-10 text-center">{lineHeight.toFixed(1)}</span>
                   <button
                     onClick={handleLineHeightIncrease}
                     className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"

@@ -46,13 +46,13 @@ export default function ReaderHeader({
   const handleFontSizeIncrease = () => onFontSizeChange(fontSize + 1);
 
   const handleLineHeightDecrease = () => {
-    const newHeight = Math.max(1.2, lineHeight - 0.2);
-    onLineHeightChange(newHeight);
+    const newHeight = Math.max(1.2, lineHeight - 0.1);
+    onLineHeightChange(Math.round(newHeight * 10) / 10);
   };
 
   const handleLineHeightIncrease = () => {
-    const newHeight = Math.min(3.0, lineHeight + 0.2);
-    onLineHeightChange(newHeight);
+    const newHeight = Math.min(3.0, lineHeight + 0.1);
+    onLineHeightChange(Math.round(newHeight * 10) / 10);
   };
 
   const handleFontFamilyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -139,7 +139,7 @@ export default function ReaderHeader({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
                 </svg>
               </button>
-              <span className="text-sm text-slate-600 w-10 text-center">{lineHeight}</span>
+              <span className="text-sm text-slate-600 w-10 text-center">{lineHeight.toFixed(1)}</span>
               <button
                 onClick={handleLineHeightIncrease}
                 className="w-8 h-8 flex items-center justify-center rounded text-slate-600 hover:bg-white hover:shadow-sm transition-all"

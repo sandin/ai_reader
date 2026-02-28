@@ -41,10 +41,28 @@ export default function ReaderPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
 
-  // Font settings state
-  const [fontSize, setFontSize] = useState(18);
-  const [fontFamily, setFontFamily] = useState('Georgia, serif');
-  const [lineHeight, setLineHeight] = useState(1.8);
+  // Font settings state - initialize from localStorage directly
+  const [fontSize, setFontSize] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('reader-font-size');
+      return saved ? parseInt(saved, 10) : 18;
+    }
+    return 18;
+  });
+  const [fontFamily, setFontFamily] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('reader-font-family');
+      return saved || 'Georgia, serif';
+    }
+    return 'Georgia, serif';
+  });
+  const [lineHeight, setLineHeight] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('reader-line-height');
+      return saved ? parseFloat(saved) : 1.8;
+    }
+    return 1.8;
+  });
 
   // Reading progress state
   const [savedCfi, setSavedCfi] = useState<string | null>(null);
@@ -118,17 +136,8 @@ export default function ReaderPage() {
 
   // ==================== Initialization ====================
 
-  // panel layout from Load font settings and localStorage
+  // Load other settings from localStorage (these don't need immediate value)
   useEffect(() => {
-    const savedFontSize = localStorage.getItem('reader-font-size');
-    if (savedFontSize) setFontSize(parseInt(savedFontSize, 10));
-
-    const savedFontFamily = localStorage.getItem('reader-font-family');
-    if (savedFontFamily) setFontFamily(savedFontFamily);
-
-    const savedLineHeight = localStorage.getItem('reader-line-height');
-    if (savedLineHeight) setLineHeight(parseFloat(savedLineHeight));
-
     const savedAutoScroll = localStorage.getItem('ai-chat-auto-scroll');
     if (savedAutoScroll === 'true') setAutoScrollOnStreaming(true);
 
@@ -1470,6 +1479,16 @@ export default function ReaderPage() {
                     setCompressContent(content);
                     setCompressMessageId(messageId);
                     setShowCompress(true);
+                  }}
+                  onEditMessage={(messageId, newContent) => {
+                    setMessages(prev => prev.map(msg =>
+                      msg.id === messageId
+                        ? {
+                            ...msg,
+                            blocks: [{ ...msg.blocks[0], content: newContent }]
+                          }
+                        : msg
+                    ));
                   }}
                 />
               )}

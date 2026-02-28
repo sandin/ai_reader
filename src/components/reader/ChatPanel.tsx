@@ -39,6 +39,7 @@ interface ChatPanelProps {
   onToggleSelectedBlocksExpand: () => void;
   onInputLayoutChange?: (sizes: { [key: string]: number }) => void;
   onOpenCompress?: (content: string, messageId: string) => void;
+  onEditMessage?: (messageId: string, newContent: string) => void;
 }
 
 export default function ChatPanel({
@@ -68,6 +69,7 @@ export default function ChatPanel({
   onToggleSelectedBlocksExpand,
   onInputLayoutChange,
   onOpenCompress,
+  onEditMessage,
 }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -77,6 +79,7 @@ export default function ChatPanel({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [editingMessage, setEditingMessage] = useState<{ id: string; content: string } | null>(null);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
@@ -345,7 +348,13 @@ export default function ChatPanel({
                           mermaidEnabled={mermaidEnabled}
                         />
                       ) : (
-                        <UserMessageContent content={msg.blocks.map(b => b.content).join('\n\n')} index={index} />
+                        <UserMessageContent
+                          content={msg.blocks.map(b => b.content).join('\n\n')}
+                          index={index}
+                          fontSize={fontSize}
+                          fontFamily={fontFamily}
+                          lineHeight={lineHeight}
+                        />
                       )}
                     </div>
                     {/* Copy and delete buttons row - always visible space, buttons show on hover */}
@@ -355,6 +364,20 @@ export default function ChatPanel({
                           onClick={() => {
                             const content = msg.blocks.map(b => b.content).join('\n\n');
                             onOpenCompress?.(content, msg.id);
+                          }}
+                          className="w-5 h-5 flex items-center justify-center rounded text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 transition-colors"
+                          title="编辑"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </button>
+                      )}
+                      {msg.role === 'user' && (
+                        <button
+                          onClick={() => {
+                            const content = msg.blocks.map(b => b.content).join('\n\n');
+                            setEditingMessage({ id: msg.id, content });
                           }}
                           className="w-5 h-5 flex items-center justify-center rounded text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 transition-colors"
                           title="编辑"
@@ -491,6 +514,40 @@ export default function ChatPanel({
                 className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
               >
                 删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit message dialog */}
+      {editingMessage && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl p-6 max-w-lg mx-4 w-full">
+            <h3 className="text-lg font-semibold text-slate-800 mb-4">编辑消息</h3>
+            <textarea
+              value={editingMessage.content}
+              onChange={(e) => setEditingMessage({ ...editingMessage, content: e.target.value })}
+              className="w-full h-48 px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+              autoFocus
+            />
+            <div className="flex justify-end gap-3 mt-4">
+              <button
+                onClick={() => setEditingMessage(null)}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  if (editingMessage.content.trim()) {
+                    onEditMessage?.(editingMessage.id, editingMessage.content);
+                  }
+                  setEditingMessage(null);
+                }}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+              >
+                保存
               </button>
             </div>
           </div>
@@ -658,14 +715,33 @@ function MessageContent({
 }
 
 // User message content component - shows only content after "用户输入：" for first message
-function UserMessageContent({ content, index }: { content: string; index: number }) {
+function UserMessageContent({
+  content,
+  index,
+  fontSize = 18,
+  fontFamily = 'Georgia, serif',
+  lineHeight = 1.8,
+}: {
+  content: string;
+  index: number;
+  fontSize?: number;
+  fontFamily?: string;
+  lineHeight?: number;
+}) {
   const isFirstUserMessage = index === 0;
   let text = content;
   if (isFirstUserMessage) {
     const match = content.match(/用户输入：([\s\S]*)/);
     text = match ? match[1] : content;
   }
-  return <div className="whitespace-pre-wrap">{text}</div>;
+  return (
+    <div
+      className="whitespace-pre-wrap"
+      style={{ fontSize: `${fontSize}px`, fontFamily, lineHeight, color: '#3a3a3a' }}
+    >
+      {text}
+    </div>
+  );
 }
 
 // Mermaid chart component
