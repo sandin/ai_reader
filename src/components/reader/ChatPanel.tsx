@@ -83,16 +83,24 @@ export default function ChatPanel({
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
+  const isAutoScrollingRef = useRef(false);
+
   // Handle auto-scroll during streaming
   useEffect(() => {
     if (autoScrollOnStreaming && aiLoading && chatContainerRef.current) {
+      isAutoScrollingRef.current = true;
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+      // Reset the flag after the scroll animation completes
+      setTimeout(() => {
+        isAutoScrollingRef.current = false;
+      }, 100);
     }
   }, [messages, aiLoading, autoScrollOnStreaming]);
 
   // Handle manual scroll - disable auto-scroll when user scrolls manually
   const handleScroll = useCallback(() => {
-    if (autoScrollOnStreaming && onToggleAutoScroll) {
+    // Only handle manual scroll, not auto-scroll triggered by streaming
+    if (!isAutoScrollingRef.current && autoScrollOnStreaming && onToggleAutoScroll) {
       onToggleAutoScroll(false);
     }
   }, [autoScrollOnStreaming, onToggleAutoScroll]);
