@@ -9,6 +9,7 @@ interface Book {
   author: string;
   cover?: string;
   filename: string;
+  status?: 'unread' | 'reading' | 'completed';
 }
 
 interface BooksResponse {
@@ -32,7 +33,7 @@ export default function Home() {
   const fetchBooks = async (page: number) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/books?page=${page}&limit=6`);
+      const res = await fetch(`/api/books?page=${page}&limit=10`);
       const json = await res.json();
       setData(json);
     } catch (error) {
@@ -137,6 +138,27 @@ export default function Home() {
       alert('重命名失败');
     } finally {
       setRenamingBook(null);
+    }
+  };
+
+  const toggleStatus = async (book: Book, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const newStatus = book.status === 'reading' ? 'completed' : 'reading';
+
+    try {
+      const res = await fetch('/api/progress', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookId: book.id, status: newStatus }),
+      });
+
+      if (res.ok) {
+        fetchBooks(data?.page || 1);
+      }
+    } catch (error) {
+      console.error('Error toggling status:', error);
     }
   };
 
@@ -325,7 +347,21 @@ export default function Home() {
                     ) : (
                       <h3 className="font-medium text-slate-900 truncate group-hover:text-indigo-600 transition-colors text-xs">{book.title}</h3>
                     )}
-                    <p className="text-xs text-slate-500">{book.author}</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-slate-500">{book.author}</p>
+                      {book.status && book.status !== 'unread' && (
+                        <button
+                          onClick={(e) => toggleStatus(book, e)}
+                          className={`text-[10px] px-1.5 py-0.5 rounded-full cursor-pointer hover:opacity-80 transition-opacity ${
+                            book.status === 'reading'
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'bg-green-100 text-green-700'
+                          }`}
+                        >
+                          {book.status === 'reading' ? '在读' : '已读'}
+                        </button>
+                      )}
+                    </div>
                   </Link>
                 </div>
               ))}

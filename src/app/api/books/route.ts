@@ -9,6 +9,22 @@ interface Book {
   author: string;
   cover?: string;
   filename: string;
+  status?: 'unread' | 'reading' | 'completed';
+}
+
+// Get reading status from bookmark.json
+function getBookStatus(bookName: string): 'unread' | 'reading' | 'completed' {
+  try {
+    const bookmarkPath = path.join(process.cwd(), 'notes', bookName, 'bookmark.json');
+    if (fs.existsSync(bookmarkPath)) {
+      const content = fs.readFileSync(bookmarkPath, 'utf-8');
+      const data = JSON.parse(content);
+      return data.status || 'unread';
+    }
+  } catch (e) {
+    // Ignore errors
+  }
+  return 'unread';
 }
 
 // Parse EPUB file to extract metadata and cover
@@ -125,6 +141,7 @@ export async function GET(request: Request) {
         const filePath = path.join(booksDir, filename);
         const metadata = await parseEpubMetadata(filePath);
         const nameWithoutExt = filename.replace('.epub', '');
+        const bookStatus = getBookStatus(nameWithoutExt);
 
         return {
           id,
@@ -132,6 +149,7 @@ export async function GET(request: Request) {
           author: metadata.author,
           cover: metadata.cover,
           filename,
+          status: bookStatus,
         };
       })
     );
