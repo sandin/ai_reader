@@ -17,8 +17,10 @@ import {
   CommentPanel,
   ContextMenu,
   EditSessionModal,
+  SettingsModal,
   LoadingState,
   ErrorState,
+  defaultToolbarSettings,
 } from '@/components/reader';
 
 export default function ReaderPage() {
@@ -50,6 +52,7 @@ export default function ReaderPage() {
   const [showToc, setShowToc] = useState(true);
   const [autoScrollOnStreaming, setAutoScrollOnStreaming] = useState(false);
   const [highlightEnabled, setHighlightEnabled] = useState(true);
+  const [mermaidEnabled, setMermaidEnabled] = useState(true);
   const [isContentReady, setIsContentReady] = useState(false);
   const [bookTitle, setBookTitle] = useState<string>('');
 
@@ -69,6 +72,10 @@ export default function ReaderPage() {
   const [showEditSession, setShowEditSession] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingSessionTitle, setEditingSessionTitle] = useState('');
+
+  // Settings modal state
+  const [showSettings, setShowSettings] = useState(false);
+  const [toolbarSettings, setToolbarSettings] = useState(defaultToolbarSettings);
 
   // Context menu state
   const [showContextMenu, setShowContextMenu] = useState(false);
@@ -127,6 +134,14 @@ export default function ReaderPage() {
       setHighlightEnabled(true);
     }
 
+    const savedMermaidEnabled = localStorage.getItem('reader-mermaid-enabled');
+    if (savedMermaidEnabled !== null) {
+      setMermaidEnabled(savedMermaidEnabled !== 'false');
+    } else {
+      // Default to true if not set
+      setMermaidEnabled(true);
+    }
+
     const savedHistory = localStorage.getItem('ai-chat-input-history');
     if (savedHistory) {
       try {
@@ -142,6 +157,14 @@ export default function ReaderPage() {
         if (layout.toc) setTocLayout(layout.toc);
         if (layout.right) setRightLayout(layout.right);
         if (layout.chatInput) setChatInputLayout(layout.chatInput);
+      } catch (e) { /* ignore */ }
+    }
+
+    // Load toolbar settings from localStorage
+    const savedToolbarSettings = localStorage.getItem('reader-toolbar-settings');
+    if (savedToolbarSettings) {
+      try {
+        setToolbarSettings({ ...defaultToolbarSettings, ...JSON.parse(savedToolbarSettings) });
       } catch (e) { /* ignore */ }
     }
   }, []);
@@ -1192,6 +1215,7 @@ export default function ReaderPage() {
         showToc={showToc}
         autoScrollOnStreaming={autoScrollOnStreaming}
         highlightEnabled={highlightEnabled}
+        mermaidEnabled={mermaidEnabled}
         onFontSizeChange={(size) => setFontSize(Math.min(32, Math.max(14, size)))}
         onFontFamilyChange={setFontFamily}
         onLineHeightChange={setLineHeight}
@@ -1206,6 +1230,13 @@ export default function ReaderPage() {
           setHighlightEnabled(newValue);
           localStorage.setItem('reader-highlight-enabled', String(newValue));
         }}
+        onToggleMermaid={() => {
+          const newValue = !mermaidEnabled;
+          setMermaidEnabled(newValue);
+          localStorage.setItem('reader-mermaid-enabled', String(newValue));
+        }}
+        onOpenSettings={() => setShowSettings(true)}
+        toolbarSettings={toolbarSettings}
       />
 
       <PanelGroup
@@ -1386,6 +1417,7 @@ export default function ReaderPage() {
                   fontFamily={fontFamily}
                   lineHeight={lineHeight}
                   autoScrollOnStreaming={autoScrollOnStreaming}
+                  mermaidEnabled={mermaidEnabled}
                   onToggleAutoScroll={(enabled) => {
                     setAutoScrollOnStreaming(enabled);
                     localStorage.setItem('ai-chat-auto-scroll', String(enabled));
@@ -1432,6 +1464,38 @@ export default function ReaderPage() {
         onTitleChange={setEditingSessionTitle}
         onSave={handleSaveSessionTitle}
         onClose={() => setShowEditSession(false)}
+      />
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        fontSize={fontSize}
+        fontFamily={fontFamily}
+        lineHeight={lineHeight}
+        onFontSizeChange={(size) => setFontSize(Math.min(32, Math.max(14, size)))}
+        onFontFamilyChange={setFontFamily}
+        onLineHeightChange={setLineHeight}
+        autoScrollOnStreaming={autoScrollOnStreaming}
+        highlightEnabled={highlightEnabled}
+        mermaidEnabled={mermaidEnabled}
+        onToggleAutoScroll={() => {
+          const newValue = !autoScrollOnStreaming;
+          setAutoScrollOnStreaming(newValue);
+          localStorage.setItem('ai-chat-auto-scroll', String(newValue));
+        }}
+        onToggleHighlight={() => {
+          const newValue = !highlightEnabled;
+          setHighlightEnabled(newValue);
+          localStorage.setItem('reader-highlight-enabled', String(newValue));
+        }}
+        onToggleMermaid={() => {
+          const newValue = !mermaidEnabled;
+          setMermaidEnabled(newValue);
+          localStorage.setItem('reader-mermaid-enabled', String(newValue));
+        }}
+        toolbarSettings={toolbarSettings}
+        onToolbarSettingsChange={setToolbarSettings}
       />
     </div>
   );

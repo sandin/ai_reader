@@ -7,4 +7,5 @@ export { default as ChatPanel } from './ChatPanel';
 export { default as CommentPanel } from './CommentPanel';
 export { default as ContextMenu } from './ContextMenu';
 export { default as EditSessionModal } from './EditSessionModal';
+export { default as SettingsModal } from './SettingsModal';
 export { LoadingState, ErrorState } from './ReaderStates';

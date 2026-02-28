@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import mermaid from 'mermaid';
 import { Panel, Group as PanelGroup, Separator } from 'react-resizable-panels';
 import { Block, Message, Session } from './types';
 
@@ -24,6 +25,8 @@ interface ChatPanelProps {
   // Auto-scroll setting
   autoScrollOnStreaming: boolean;
   onToggleAutoScroll?: (enabled: boolean) => void;
+  // Mermaid setting
+  mermaidEnabled?: boolean;
   // Callbacks
   onSendMessage: (input: string, isFirstMessage: boolean) => void;
   onSwitchSession: (sessionId: string) => void;
@@ -52,6 +55,7 @@ export default function ChatPanel({
   lineHeight = 1.8,
   autoScrollOnStreaming,
   onToggleAutoScroll,
+  mermaidEnabled = true,
   onSendMessage,
   onSwitchSession,
   onCreateSession,
@@ -336,6 +340,7 @@ export default function ChatPanel({
                           fontSize={fontSize}
                           fontFamily={fontFamily}
                           lineHeight={lineHeight}
+                          mermaidEnabled={mermaidEnabled}
                         />
                       ) : (
                         <UserMessageContent content={msg.blocks.map(b => b.content).join('\n\n')} index={index} />
@@ -486,12 +491,14 @@ function MessageContent({
   fontSize = 18,
   fontFamily = 'Georgia, serif',
   lineHeight = 1.8,
+  mermaidEnabled = true,
 }: {
   content: string;
   isStreaming: boolean;
   fontSize?: number;
   fontFamily?: string;
   lineHeight?: number;
+  mermaidEnabled?: boolean;
 }) {
   if (isStreaming && !content) {
     return (
@@ -557,6 +564,21 @@ function MessageContent({
         ),
         code: ({ className, children }) => {
           const isInline = !className;
+          const codeContent = String(children).replace(/\n$/, '');
+          const isMermaid = className?.includes('language-mermaid');
+
+          if (isMermaid && mermaidEnabled) {
+            return <MermaidChart code={codeContent} />;
+          }
+
+          if (isMermaid && !mermaidEnabled) {
+            return (
+              <code className="block bg-slate-800 text-slate-100 p-3 rounded-lg overflow-x-auto mb-3 text-sm">
+                {children}
+              </code>
+            );
+          }
+
           return isInline ? (
             <code className="bg-slate-100 text-pink-600 px-1.5 py-0.5 rounded text-sm font-mono">
               {children}
@@ -628,4 +650,52 @@ function UserMessageContent({ content, index }: { content: string; index: number
     text = match ? match[1] : content;
   }
   return <div className="whitespace-pre-wrap">{text}</div>;
+}
+
+// Mermaid chart component
+function MermaidChart({ code }: { code: string }) {
+  const [svg, setSvg] = useState<string>('');
+  const [error, setError] = useState<string>('');
+  const idRef = useRef<string>(`mermaid-${Math.random().toString(36).substring(2, 11)}`);
+
+  useEffect(() => {
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'default',
+    });
+
+    const renderChart = async () => {
+      try {
+        const { svg } = await mermaid.render(idRef.current, code);
+        setSvg(svg);
+        setError('');
+      } catch (err) {
+        console.error('Mermaid render error:', err);
+        setError(err instanceof Error ? err.message : '图表渲染失败');
+        setSvg('');
+      }
+    };
+
+    renderChart();
+  }, [code]);
+
+  if (error) {
+    return (
+      <div className="mb-3">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-t-lg px-3 py-2 text-yellow-700 text-sm">
+          ⚠️ Mermaid 图表渲染失败
+        </div>
+        <pre className="bg-slate-800 text-slate-100 p-3 rounded-b-lg overflow-x-auto text-sm">
+          <code>{code}</code>
+        </pre>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="mb-3 overflow-x-auto flex justify-center"
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
 }

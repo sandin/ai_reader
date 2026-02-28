@@ -58,6 +58,25 @@ export interface FontOption {
   label: string;
 }
 
+// Toolbar visibility settings
+export interface ToolbarSettings {
+  showFontSize: boolean;
+  showFontFamily: boolean;
+  showLineHeight: boolean;
+  showAutoScroll: boolean;
+  showHighlight: boolean;
+  showMermaid: boolean;
+}
+
+export const defaultToolbarSettings: ToolbarSettings = {
+  showFontSize: true,
+  showFontFamily: true,
+  showLineHeight: true,
+  showAutoScroll: true,
+  showHighlight: true,
+  showMermaid: true,
+};
+
 export const FONT_OPTIONS: FontOption[] = [
   { value: 'Georgia, "Times New Roman", serif', label: '衬线体' },
   { value: 'Arial, Helvetica, sans-serif', label: '无衬线' },

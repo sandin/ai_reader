@@ -12,6 +12,7 @@
     "@langchain/openai": "^1.2.10",
     "epubjs": "^0.3.93",
     "langchain": "^1.2.27",
+    "mermaid": "^11.12.3",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
