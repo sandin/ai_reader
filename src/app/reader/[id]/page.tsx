@@ -342,8 +342,9 @@ export default function ReaderPage() {
             const indexInfo = findInTree(searchTree);
             console.log('[Reader] Index info:', indexInfo);
             if (indexInfo) {
-              setCurrentChapter(indexInfo.contents[0] || '');
-              console.log('[Reader] Set currentChapter to:', indexInfo.contents[0]);
+              // 使用保存的 htmlFile，而不是第一个
+              setCurrentChapter(progressData.htmlFile);
+              console.log('[Reader] Set currentChapter to:', progressData.htmlFile);
             } else {
               const matched = chapterList.find((c: Chapter) => c.href.split('#')[0].split('/').pop() === htmlFileName);
               if (matched) {
