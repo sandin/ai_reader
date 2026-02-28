@@ -18,6 +18,7 @@ import {
   ContextMenu,
   EditSessionModal,
   SettingsModal,
+  CompressModal,
   LoadingState,
   ErrorState,
   defaultToolbarSettings,
@@ -76,6 +77,11 @@ export default function ReaderPage() {
   // Settings modal state
   const [showSettings, setShowSettings] = useState(false);
   const [toolbarSettings, setToolbarSettings] = useState(defaultToolbarSettings);
+
+  // Compress modal state
+  const [showCompress, setShowCompress] = useState(false);
+  const [compressContent, setCompressContent] = useState('');
+  const [compressMessageId, setCompressMessageId] = useState('');
 
   // Context menu state
   const [showContextMenu, setShowContextMenu] = useState(false);
@@ -861,6 +867,27 @@ export default function ReaderPage() {
     }
   }, [messages, currentSessionId, selectedBlocks]);
 
+  const handleCompressSubmit = useCallback(async (messageId: string, content: string) => {
+    // Update the message content
+    const newMessages = messages.map(msg => {
+      if (msg.id === messageId) {
+        return {
+          ...msg,
+          blocks: [{ id: `${messageId}-block`, content, timestamp: Date.now() }]
+        };
+      }
+      return msg;
+    });
+    setMessages(newMessages);
+
+    if (currentSessionId) {
+      setSessions(prev => prev.map(s =>
+        s.id === currentSessionId ? { ...s, messages: newMessages, timestamp: Date.now() } : s
+      ));
+      await saveCurrentSession(newMessages, selectedBlocks);
+    }
+  }, [messages, currentSessionId, selectedBlocks]);
+
   const handleToggleExpandBlock = useCallback((id: string) => {
     setExpandedBlocks(prev => {
       const next = new Set(prev);
@@ -1438,6 +1465,11 @@ export default function ReaderPage() {
                     }));
                     setChatInputLayout(sizes);
                   }}
+                  onOpenCompress={(content, messageId) => {
+                    setCompressContent(content);
+                    setCompressMessageId(messageId);
+                    setShowCompress(true);
+                  }}
                 />
               )}
 
@@ -1499,6 +1531,15 @@ export default function ReaderPage() {
         }}
         toolbarSettings={toolbarSettings}
         onToolbarSettingsChange={setToolbarSettings}
+      />
+
+      {/* Compress Modal */}
+      <CompressModal
+        isOpen={showCompress}
+        onClose={() => setShowCompress(false)}
+        content={compressContent}
+        messageId={compressMessageId}
+        onSubmit={handleCompressSubmit}
       />
     </div>
   );

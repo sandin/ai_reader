@@ -8,4 +8,5 @@ export { default as CommentPanel } from './CommentPanel';
 export { default as ContextMenu } from './ContextMenu';
 export { default as EditSessionModal } from './EditSessionModal';
 export { default as SettingsModal } from './SettingsModal';
+export { default as CompressModal } from './CompressModal';
 export { LoadingState, ErrorState } from './ReaderStates';

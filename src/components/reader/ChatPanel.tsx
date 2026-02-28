@@ -38,6 +38,7 @@ interface ChatPanelProps {
   onToggleExpandBlock: (id: string) => void;
   onToggleSelectedBlocksExpand: () => void;
   onInputLayoutChange?: (sizes: { [key: string]: number }) => void;
+  onOpenCompress?: (content: string, messageId: string) => void;
 }
 
 export default function ChatPanel({
@@ -66,6 +67,7 @@ export default function ChatPanel({
   onToggleExpandBlock,
   onToggleSelectedBlocksExpand,
   onInputLayoutChange,
+  onOpenCompress,
 }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -348,6 +350,20 @@ export default function ChatPanel({
                     </div>
                     {/* Copy and delete buttons row - always visible space, buttons show on hover */}
                     <div className="h-6 mt-1 flex justify-end items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {msg.role === 'assistant' && (
+                        <button
+                          onClick={() => {
+                            const content = msg.blocks.map(b => b.content).join('\n\n');
+                            onOpenCompress?.(content, msg.id);
+                          }}
+                          className="w-5 h-5 flex items-center justify-center rounded text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 transition-colors"
+                          title="编辑"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </button>
+                      )}
                       <button
                         onClick={() => {
                           const content = msg.blocks.map(b => b.content).join('\n\n');
