@@ -1461,6 +1461,9 @@ export default function ReaderPage() {
       <EditSessionModal
         visible={showEditSession}
         title={editingSessionTitle}
+        bookId={bookId}
+        currentChapter={currentChapter}
+        sessionId={editingSessionId || undefined}
         onTitleChange={setEditingSessionTitle}
         onSave={handleSaveSessionTitle}
         onClose={() => setShowEditSession(false)}
