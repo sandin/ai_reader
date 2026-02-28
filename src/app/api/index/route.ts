@@ -34,7 +34,7 @@ export async function GET(request: Request) {
     const bookName = decodedBookId.replace(/\.epub$/, '');
 
     // Index file path
-    const notesDir = path.join(process.cwd(), 'notes', bookName);
+    const notesDir = path.join(process.cwd(), 'data', 'notes', bookName);
     const indexFilePath = path.join(notesDir, 'index.json');
 
     if (!fs.existsSync(indexFilePath)) {
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
     const bookName = decodedBookId.replace(/\.epub$/, '');
 
     // Notes directory
-    const notesDir = path.join(process.cwd(), 'notes', bookName);
+    const notesDir = path.join(process.cwd(), 'data', 'notes', bookName);
 
     // Create directory if it doesn't exist
     if (!fs.existsSync(notesDir)) {

@@ -12,7 +12,7 @@ export async function GET(
   // Add padding if needed
   const padded = standardBase64 + '=='.slice(0, (4 - standardBase64.length % 4) % 4);
   const filename = Buffer.from(padded, 'base64').toString('utf-8');
-  const filepath = path.join(process.cwd(), 'book', filename);
+  const filepath = path.join(process.cwd(), 'data', 'books', filename);
 
   try {
     if (!fs.existsSync(filepath)) {

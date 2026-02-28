@@ -15,7 +15,7 @@ interface Book {
 // Get reading status from bookmark.json
 function getBookStatus(bookName: string): 'unread' | 'reading' | 'completed' {
   try {
-    const bookmarkPath = path.join(process.cwd(), 'notes', bookName, 'bookmark.json');
+    const bookmarkPath = path.join(process.cwd(), 'data', 'notes', bookName, 'bookmark.json');
     if (fs.existsSync(bookmarkPath)) {
       const content = fs.readFileSync(bookmarkPath, 'utf-8');
       const data = JSON.parse(content);
@@ -120,7 +120,7 @@ export async function GET(request: Request) {
   const page = parseInt(searchParams.get('page') || '1');
   const limit = parseInt(searchParams.get('limit') || '10');
 
-  const booksDir = path.join(process.cwd(), 'book');
+  const booksDir = path.join(process.cwd(), 'data', 'books');
 
   try {
     const files = fs.readdirSync(booksDir).filter(f => f.endsWith('.epub'));

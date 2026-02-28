@@ -26,8 +26,8 @@ export async function POST(request: Request) {
     // Extract just the filename from htmlFile (remove path prefix like "OEBPS/")
     const htmlFileName = path.basename(htmlFile);
 
-    // Notes directory at project root (same level as 'book')
-    const notesDir = path.join(process.cwd(), 'notes');
+    // Notes directory at project root (same level as 'books')
+    const notesDir = path.join(process.cwd(), 'data', 'notes');
 
     // Create notes directory if it doesn't exist
     if (!fs.existsSync(notesDir)) {

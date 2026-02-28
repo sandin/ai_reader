@@ -38,7 +38,7 @@ epubcfi(/起始位置,/结束位置)
 
 ### 2.3 本项目中的 CFI 示例
 
-从 [part0003.json](notes/论生命之短暂/part0003.json) 中提取的实际数据：
+从 [part0003.json](data/notes/论生命之短暂/part0003.json) 中提取的实际数据：
 
 ```json
 {

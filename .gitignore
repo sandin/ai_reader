@@ -40,8 +40,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# book
-/book
-/notes
-
+/data
 /prompt.md

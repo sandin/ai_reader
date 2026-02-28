@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     const bookName = decodedBookId.replace(/\.epub$/, '');
 
     // Notes directory at project root
-    const notesDir = path.join(process.cwd(), 'notes');
+    const notesDir = path.join(process.cwd(), 'data', 'notes');
 
     // Create notes directory if it doesn't exist
     if (!fs.existsSync(notesDir)) {
@@ -88,7 +88,7 @@ export async function PATCH(request: Request) {
     const bookName = decodedBookId.replace(/\.epub$/, '');
 
     // Bookmark file path (per-book)
-    const bookmarkFilePath = path.join(process.cwd(), 'notes', bookName, 'bookmark.json');
+    const bookmarkFilePath = path.join(process.cwd(), 'data', 'notes', bookName, 'bookmark.json');
 
     let bookmarkData = { status: 'unread', timestamp: Date.now() };
     if (fs.existsSync(bookmarkFilePath)) {
@@ -104,7 +104,7 @@ export async function PATCH(request: Request) {
     bookmarkData.timestamp = Date.now();
 
     // Ensure directory exists
-    const bookNotesDir = path.join(process.cwd(), 'notes', bookName);
+    const bookNotesDir = path.join(process.cwd(), 'data', 'notes', bookName);
     if (!fs.existsSync(bookNotesDir)) {
       fs.mkdirSync(bookNotesDir, { recursive: true });
     }
@@ -140,7 +140,7 @@ export async function GET(request: Request) {
     const bookName = decodedBookId.replace(/\.epub$/, '');
 
     // Bookmark file path (per-book)
-    const bookmarkFilePath = path.join(process.cwd(), 'notes', bookName, 'bookmark.json');
+    const bookmarkFilePath = path.join(process.cwd(), 'data', 'notes', bookName, 'bookmark.json');
 
     if (!fs.existsSync(bookmarkFilePath)) {
       return NextResponse.json({ htmlFile: null, cfi: null });

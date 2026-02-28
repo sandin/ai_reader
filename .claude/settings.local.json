@@ -14,7 +14,10 @@
       "Bash(wc -l f:/lds/project/ai_reader/ai_reader/src/app/reader/[id]/page.tsx)",
       "Bash(npm show react-resizable-panels)",
       "Bash(npm install remark-gfm)",
-      "Bash(npm install adm-zip)"
+      "Bash(npm install adm-zip)",
+      "Bash(cmd //c \"ren book books\")",
+      "Bash(powershell -Command \"Rename-Item -Path ''book'' -NewName ''books''\")",
+      "Bash(powershell -Command \"Get-Process | Where-Object {$_Path -like ''*ai_reader*''} | Select-Object Id, ProcessName\")"
     ]
   }
 }

@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     // 从服务端读取会话数据
     const bookName = decodeBookId(bookId);
     const htmlFileName = path.basename(htmlFile);
-    const bookNotesDir = path.join(process.cwd(), 'notes', bookName);
+    const bookNotesDir = path.join(process.cwd(), 'data', 'notes', bookName);
     const jsonFileName = htmlFileName.replace(/\.[^/.]+$/, '') + '.json';
     const jsonFilePath = path.join(bookNotesDir, jsonFileName);
 

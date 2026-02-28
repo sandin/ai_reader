@@ -17,8 +17,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const booksDir = path.join(process.cwd(), 'book');
-  const notesDir = path.join(process.cwd(), 'notes');
+  const booksDir = path.join(process.cwd(), 'data', 'books');
+  const notesDir = path.join(process.cwd(), 'data', 'notes');
 
   try {
     const filename = decodeBookId(id);
@@ -54,8 +54,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const booksDir = path.join(process.cwd(), 'book');
-  const notesDir = path.join(process.cwd(), 'notes');
+  const booksDir = path.join(process.cwd(), 'data', 'books');
+  const notesDir = path.join(process.cwd(), 'data', 'notes');
 
   try {
     const body = await request.json();

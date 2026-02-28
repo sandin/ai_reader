@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 export async function POST(request: Request) {
-  const booksDir = path.join(process.cwd(), 'book');
+  const booksDir = path.join(process.cwd(), 'data', 'books');
 
   try {
     const formData = await request.formData();

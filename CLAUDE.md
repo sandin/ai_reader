@@ -31,8 +31,8 @@ npm run lint         # Run ESLint
 - **UI Components**: react-resizable-panels
 
 ### Key Directories
-- `book/` - EPUB files directory (place .epub files here)
-- `notes/` - Auto-created directory for saved notes (JSON files per chapter)
+- `data/books/` - EPUB files directory (place .epub files here)
+- `data/notes/` - Auto-created directory for saved notes (JSON files per chapter)
 - `src/app/` - Next.js App Router pages and API routes
 
 ### API Routes
@@ -64,4 +64,4 @@ Book IDs use URL-safe base64 encoding. When decoding:
 - System prompt instructs the AI to be a reading assistant
 
 ### Notes Storage
-Notes are saved as JSON files in `notes/{book_name}/{chapter}.json`.
+Notes are saved as JSON files in `data/notes/{book_name}/{chapter}.json`.
