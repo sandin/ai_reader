@@ -820,8 +820,10 @@ export default function ReaderPage() {
   }, [rendition, highlightEnabled]);
 
   const refreshHighlights = useCallback((blocks: Block[]) => {
+    // 先清空旧的高亮，再应用新的
+    clearHighlights();
+
     if (!highlightEnabled) {
-      clearHighlights();
       return;
     }
     blocks.forEach(block => highlightBlock(block));
@@ -836,7 +838,7 @@ export default function ReaderPage() {
     } else {
       clearHighlights();
     }
-  }, [highlightEnabled]);
+  }, [highlightEnabled, selectedBlocks, rendition, refreshHighlights, clearHighlights]);
 
   // ==================== Blocks ====================
 
