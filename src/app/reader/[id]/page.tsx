@@ -1386,6 +1386,10 @@ export default function ReaderPage() {
                   fontFamily={fontFamily}
                   lineHeight={lineHeight}
                   autoScrollOnStreaming={autoScrollOnStreaming}
+                  onToggleAutoScroll={(enabled) => {
+                    setAutoScrollOnStreaming(enabled);
+                    localStorage.setItem('ai-chat-auto-scroll', String(enabled));
+                  }}
                   onSendMessage={(input, isFirst) => handleSendMessage(input, isFirst)}
                   onSwitchSession={switchToSession}
                   onCreateSession={createNewSession}

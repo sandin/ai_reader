@@ -23,6 +23,7 @@ interface ChatPanelProps {
   lineHeight?: number;
   // Auto-scroll setting
   autoScrollOnStreaming: boolean;
+  onToggleAutoScroll?: (enabled: boolean) => void;
   // Callbacks
   onSendMessage: (input: string, isFirstMessage: boolean) => void;
   onSwitchSession: (sessionId: string) => void;
@@ -50,6 +51,7 @@ export default function ChatPanel({
   fontFamily = 'Georgia, serif',
   lineHeight = 1.8,
   autoScrollOnStreaming,
+  onToggleAutoScroll,
   onSendMessage,
   onSwitchSession,
   onCreateSession,
@@ -78,6 +80,13 @@ export default function ChatPanel({
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [messages, aiLoading, autoScrollOnStreaming]);
+
+  // Handle manual scroll - disable auto-scroll when user scrolls manually
+  const handleScroll = useCallback(() => {
+    if (autoScrollOnStreaming && onToggleAutoScroll) {
+      onToggleAutoScroll(false);
+    }
+  }, [autoScrollOnStreaming, onToggleAutoScroll]);
 
   const handleInputChange = (value: string) => {
     setInput(value);
@@ -298,6 +307,7 @@ export default function ChatPanel({
           {/* Messages */}
           <div
             ref={chatContainerRef}
+            onScroll={handleScroll}
             className={`flex-1 overflow-y-auto p-4 space-y-4 ${selectedBlocks.length > 0 ? 'min-h-0' : ''}`}
           >
             {messages.length === 0 && selectedBlocks.length === 0 ? (
