@@ -97,9 +97,9 @@ export default function ChatPanel({
     }
   }, [messages, aiLoading, autoScrollOnStreaming]);
 
-  // Handle manual scroll - disable auto-scroll when user scrolls manually
-  const handleScroll = useCallback(() => {
-    // Only handle manual scroll, not auto-scroll triggered by streaming
+  // Handle wheel scroll - disable auto-scroll when user scrolls manually with wheel
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    // Only handle manual wheel scroll, not auto-scroll triggered by streaming
     if (!isAutoScrollingRef.current && autoScrollOnStreaming && onToggleAutoScroll) {
       onToggleAutoScroll(false);
     }
@@ -324,7 +324,7 @@ export default function ChatPanel({
           {/* Messages */}
           <div
             ref={chatContainerRef}
-            onScroll={handleScroll}
+            onWheel={handleWheel}
             className={`flex-1 overflow-y-auto p-4 space-y-4 ${selectedBlocks.length > 0 ? 'min-h-0' : ''}`}
           >
             {messages.length === 0 && selectedBlocks.length === 0 ? (
