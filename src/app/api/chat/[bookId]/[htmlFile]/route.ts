@@ -2,28 +2,6 @@ import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { authenticateRequest, requireAuth } from '@/lib/auth';
 
-// Helper to decode bookId (base64 encoded book key)
-function decodeBookId(bookId: string): string {
-  const standardBase64 = bookId.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = standardBase64 + '=='.slice(0, (4 - standardBase64.length % 4) % 4);
-  const decodedBookId = Buffer.from(padded, 'base64').toString('utf-8');
-  return decodedBookId.replace(/\.epub$/, '');
-}
-
-// Get book ID - supports both numeric ID and base64 encoded book key
-async function parseBookId(bookId: string): Promise<number | null> {
-  const numericId = parseInt(bookId);
-  console.log('[DEBUG parseBookId] input:', bookId, 'parsed as:', numericId, 'isNaN:', isNaN(numericId));
-  if (!isNaN(numericId)) {
-    return numericId;
-  }
-  const bookKey = decodeBookId(bookId);
-  console.log('[DEBUG parseBookId] decoded bookKey:', bookKey);
-  const result = await query('SELECT id FROM books WHERE book_key = $1', [bookKey]);
-  console.log('[DEBUG parseBookId] result:', result.rows);
-  return result.rows[0]?.id || null;
-}
-
 // GET: 获取会话（按章节过滤）
 export async function GET(
   request: Request,
@@ -31,7 +9,6 @@ export async function GET(
 ) {
   try {
     const auth = await authenticateRequest(request);
-    console.log('[DEBUG auth result]', auth);
     if (!auth) {
       return NextResponse.json({ error: 'Unauthorized', sessions: [] }, { status: 401 });
     }
@@ -48,11 +25,16 @@ export async function GET(
     }
 
     const chapterFile = htmlFile.split('/').pop() || htmlFile;
-    const bookIdNum = await parseBookId(bookId);
 
-    console.log('[DEBUG GET sessions]', { bookId, htmlFile, chapterFile, bookIdNum, authUserId: auth?.userId });
+    // Parse bookId as numeric ID
+    const numericBookId = parseInt(bookId, 10);
+    if (isNaN(numericBookId)) {
+      return NextResponse.json({ error: 'Invalid book ID', sessions: [] }, { status: 400 });
+    }
 
-    if (!bookIdNum) {
+    // Check if book exists
+    const bookResult = await query('SELECT id FROM books WHERE id = $1', [numericBookId]);
+    if (bookResult.rows.length === 0) {
       return NextResponse.json({ sessions: [] });
     }
 
@@ -60,7 +42,7 @@ export async function GET(
     let sessionsQuery = `SELECT id, chapter_file, session_title, created_at, updated_at
        FROM chat_sessions
        WHERE book_id = $1 AND chapter_file = $2`;
-    const queryParams: any[] = [bookIdNum, chapterFile];
+    const queryParams: any[] = [numericBookId, chapterFile];
 
     if (sessionId) {
       const numericSessionId = parseInt(sessionId);
@@ -72,11 +54,7 @@ export async function GET(
 
     sessionsQuery += ` ORDER BY created_at DESC`;
 
-    console.log('[DEBUG sessions query]', sessionsQuery, queryParams);
-
     const sessionsResult = await query(sessionsQuery, queryParams);
-
-    console.log('[DEBUG sessions result]', sessionsResult.rows.length, sessionsResult.rows);
 
     const sessions = await Promise.all(
       sessionsResult.rows.map(async (session: { id: number; session_title: string; created_at: number; updated_at: number }) => {
@@ -113,15 +91,14 @@ export async function GET(
       })
     );
 
-    const debug = { bookId, htmlFile, chapterFile, bookIdNum, authUserId: auth?.userId, query: sessionsQuery, params: queryParams, resultCount: sessionsResult.rows.length };
-    return NextResponse.json({ sessions, debug });
+    return NextResponse.json({ sessions });
   } catch (error) {
     console.error('Error getting sessions:', error);
     return NextResponse.json({ sessions: [] });
   }
 }
 
-// DELETE: 删除会话
+// DELETE: 删除会话或删除消息
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ bookId: string; htmlFile: string }> }
@@ -134,14 +111,32 @@ export async function DELETE(
 
   try {
     const { bookId } = await params;
-    const { sessionId } = await request.json();
+    const { searchParams } = new URL(request.url);
+    const sessionId = searchParams.get('sessionId');
+    const messageId = searchParams.get('messageId');
 
     if (!bookId) {
       return NextResponse.json({ error: 'Missing required parameter: bookId' }, { status: 400 });
     }
 
-    const bookIdNum = await parseBookId(bookId);
-    if (!bookIdNum) {
+    // Parse bookId as numeric ID
+    const numericBookId = parseInt(bookId, 10);
+    if (isNaN(numericBookId)) {
+      return NextResponse.json({ error: 'Invalid book ID' }, { status: 400 });
+    }
+
+    // Check if book exists
+    const bookResult = await query('SELECT id FROM books WHERE id = $1', [numericBookId]);
+    if (bookResult.rows.length === 0) {
+      return NextResponse.json({ success: true });
+    }
+
+    // Delete single message
+    if (messageId) {
+      const numericMessageId = parseInt(messageId, 10);
+      if (!isNaN(numericMessageId)) {
+        await query('DELETE FROM chat_messages WHERE id = $1', [numericMessageId]);
+      }
       return NextResponse.json({ success: true });
     }
 
@@ -187,8 +182,16 @@ export async function POST(
     }
 
     const chapterFile = htmlFile.split('/').pop() || htmlFile;
-    const bookIdNum = await parseBookId(bookId);
-    if (!bookIdNum) {
+
+    // Parse bookId as numeric ID
+    const numericBookId = parseInt(bookId, 10);
+    if (isNaN(numericBookId)) {
+      return NextResponse.json({ error: 'Invalid book ID' }, { status: 400 });
+    }
+
+    // Check if book exists
+    const bookResult = await query('SELECT id FROM books WHERE id = $1', [numericBookId]);
+    if (bookResult.rows.length === 0) {
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
@@ -197,7 +200,7 @@ export async function POST(
       const now = Math.floor(Date.now());
       const newSession = await query(
         'INSERT INTO chat_sessions (book_id, chapter_file, session_title, created_at, updated_at) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-        [bookIdNum, chapterFile, title || `对话`, now, now]
+        [numericBookId, chapterFile, title || `对话`, now, now]
       );
       const newSessionId = newSession.rows[0].id;
 
@@ -234,8 +237,6 @@ export async function POST(
       });
     }
 
-    console.log('Saving session:', { sessionId, title, hasSelectedBlocks: !!selectedBlocks, hasMessages: !!messages });
-
     const now = Math.floor(Date.now());
     let dbSessionId: number | null = null;
 
@@ -244,7 +245,6 @@ export async function POST(
 
     if (sessionId) {
       const numericSessionId = parseInt(sessionId);
-      console.log('Processing sessionId:', numericSessionId);
       if (isNaN(numericSessionId)) {
         return NextResponse.json({ error: 'Invalid session ID' }, { status: 400 });
       }
@@ -252,7 +252,6 @@ export async function POST(
       let existingSession;
       try {
         existingSession = await query('SELECT id FROM chat_sessions WHERE id = $1', [numericSessionId]);
-        console.log('Existing session check:', existingSession.rows.length);
       } catch (dbError) {
         console.error('Database error checking session:', dbError);
         return NextResponse.json({ error: 'Database error: ' + String(dbError) }, { status: 500 });
@@ -270,14 +269,14 @@ export async function POST(
       } else {
         const newSession = await query(
           'INSERT INTO chat_sessions (book_id, chapter_file, session_title, created_at, updated_at) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-          [bookIdNum, chapterFile, title || `对话`, now, now]
+          [numericBookId, chapterFile, title || `对话`, now, now]
         );
         dbSessionId = newSession.rows[0].id;
       }
     } else if (hasSessionData) {
       const newSession = await query(
         'INSERT INTO chat_sessions (book_id, chapter_file, session_title, created_at, updated_at) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-        [bookIdNum, chapterFile, title || `对话`, now, now]
+        [numericBookId, chapterFile, title || `对话`, now, now]
       );
       dbSessionId = newSession.rows[0].id;
     }
@@ -306,5 +305,64 @@ export async function POST(
   } catch (error) {
     console.error('Error saving session:', error);
     return NextResponse.json({ error: 'Failed to save session' }, { status: 500 });
+  }
+}
+
+// PUT: 更新消息内容
+export async function PUT(
+  request: Request,
+  { params }: { params: Promise<{ bookId: string; htmlFile: string }> }
+) {
+  try {
+    await requireAuth(request);
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const { bookId } = await params;
+    let body;
+    try {
+      body = await request.json();
+    } catch (parseError) {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+    const { messageId, content } = body;
+
+    if (!bookId) {
+      return NextResponse.json({ error: 'Missing required parameter: bookId' }, { status: 400 });
+    }
+
+    if (!messageId) {
+      return NextResponse.json({ error: 'Missing required parameter: messageId' }, { status: 400 });
+    }
+
+    // Parse IDs as numeric
+    const numericBookId = parseInt(bookId, 10);
+    if (isNaN(numericBookId)) {
+      return NextResponse.json({ error: 'Invalid book ID' }, { status: 400 });
+    }
+
+    const numericMessageId = parseInt(messageId, 10);
+    if (isNaN(numericMessageId)) {
+      return NextResponse.json({ error: 'Invalid message ID' }, { status: 400 });
+    }
+
+    // Check if book exists
+    const bookResult = await query('SELECT id FROM books WHERE id = $1', [numericBookId]);
+    if (bookResult.rows.length === 0) {
+      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
+    }
+
+    // Update message
+    await query(
+      'UPDATE chat_messages SET message_content = $1 WHERE id = $2',
+      [content || '', numericMessageId]
+    );
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Error updating message:', error);
+    return NextResponse.json({ error: 'Failed to update message' }, { status: 500 });
   }
 }

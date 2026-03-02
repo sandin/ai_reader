@@ -1,31 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { authenticateRequest, requireAuth } from '@/lib/auth';
-
-// Helper to decode bookId (base64 encoded book key)
-function decodeBookId(bookId: string): string {
-  const standardBase64 = bookId.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = standardBase64 + '=='.slice(0, (4 - standardBase64.length % 4) % 4);
-  const decodedBookId = Buffer.from(padded, 'base64').toString('utf-8');
-  return decodedBookId.replace(/\.epub$/, '');
-}
-
-// Get book ID - supports both numeric ID and base64 encoded book key
-async function parseBookId(bookId: string): Promise<number | null> {
-  const numericId = parseInt(bookId);
-  if (!isNaN(numericId)) {
-    return numericId;
-  }
-  const bookKey = decodeBookId(bookId);
-  const result = await query('SELECT id FROM books WHERE book_key = $1', [bookKey]);
-  return result.rows[0]?.id || null;
-}
-
-// Get book key from numeric ID
-async function getBookKey(bookId: number): Promise<string | null> {
-  const result = await query('SELECT book_key FROM books WHERE id = $1', [bookId]);
-  return result.rows[0]?.book_key || null;
-}
+import { requireAuth } from '@/lib/auth';
 
 export async function POST(request: Request) {
   let auth;
@@ -46,39 +21,29 @@ export async function POST(request: Request) {
       );
     }
 
-    // Parse bookId (supports both numeric ID and base64 encoded)
-    const bookIdNum = await parseBookId(bookId);
+    // Parse bookId as numeric ID
+    const numericBookId = parseInt(bookId, 10);
+    if (isNaN(numericBookId)) {
+      return NextResponse.json({ error: 'Invalid book ID' }, { status: 400 });
+    }
 
-    if (!bookIdNum) {
+    // Check if book exists
+    const bookResult = await query('SELECT id FROM books WHERE id = $1', [numericBookId]);
+    if (bookResult.rows.length === 0) {
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
-    // Get book key for response
-    const bookKey = await getBookKey(bookIdNum);
-
     const now = Math.floor(Date.now());
 
-    // Upsert reading progress
+    // Update reading progress directly in books table
     await query(
-      `INSERT INTO reading_progress (book_id, current_file, cfi, status, last_read_at)
-       VALUES ($1, $2, $3, 'reading', $4)
-       ON CONFLICT (book_id) DO UPDATE SET
-         current_file = EXCLUDED.current_file,
-         cfi = EXCLUDED.cfi,
-         status = 'reading',
-         last_read_at = EXCLUDED.last_read_at`,
-      [bookIdNum, chapter, cfi || '', now]
-    );
-
-    // Update book status to reading
-    await query(
-      'UPDATE books SET status = $1, updated_at = $2 WHERE id = $3',
-      ['reading', now, bookIdNum]
+      'UPDATE books SET current_file = $1, cfi = $2, status = $3, last_read_at = $4, updated_at = $5 WHERE id = $6',
+      [chapter, cfi || '', 'reading', now, now, numericBookId]
     );
 
     return NextResponse.json({
       success: true,
-      bookKey,
+      bookId: numericBookId,
       chapter,
     });
   } catch (error) {
@@ -116,28 +81,24 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const bookIdNum = await parseBookId(bookId);
+    // Parse bookId as numeric ID
+    const numericBookId = parseInt(bookId, 10);
+    if (isNaN(numericBookId)) {
+      return NextResponse.json({ error: 'Invalid book ID' }, { status: 400 });
+    }
 
-    if (!bookIdNum) {
+    // Check if book exists
+    const bookResult = await query('SELECT id FROM books WHERE id = $1', [numericBookId]);
+    if (bookResult.rows.length === 0) {
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
     const now = Math.floor(Date.now());
 
-    // Update reading progress status
+    // Update book status directly
     await query(
-      `INSERT INTO reading_progress (book_id, status, last_read_at)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (book_id) DO UPDATE SET
-         status = EXCLUDED.status,
-         last_read_at = EXCLUDED.last_read_at`,
-      [bookIdNum, status, now]
-    );
-
-    // Update book status
-    await query(
-      'UPDATE books SET status = $1, updated_at = $2 WHERE id = $3',
-      [status, now, bookIdNum]
+      'UPDATE books SET status = $1, last_read_at = $2, updated_at = $3 WHERE id = $4',
+      [status, now, now, numericBookId]
     );
 
     return NextResponse.json({ success: true, status });
@@ -152,7 +113,7 @@ export async function PATCH(request: Request) {
 
 export async function GET(request: Request) {
   try {
-    const auth = await authenticateRequest(request);
+    const auth = await requireAuth(request);
     if (!auth) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -170,9 +131,15 @@ export async function GET(request: Request) {
       );
     }
 
-    const bookIdNum = await parseBookId(bookId);
+    // Parse bookId as numeric ID
+    const numericBookId = parseInt(bookId, 10);
+    if (isNaN(numericBookId)) {
+      return NextResponse.json({ error: 'Invalid book ID' }, { status: 400 });
+    }
 
-    if (!bookIdNum) {
+    // Check if book exists
+    const bookResult = await query('SELECT id FROM books WHERE id = $1', [numericBookId]);
+    if (bookResult.rows.length === 0) {
       return NextResponse.json({ htmlFile: null, cfi: null, status: 'unread' });
     }
 
@@ -181,37 +148,22 @@ export async function GET(request: Request) {
     // If chapter and cfi are provided, update progress while getting
     if (chapter) {
       await query(
-        `INSERT INTO reading_progress (book_id, current_file, cfi, status, last_read_at)
-         VALUES ($1, $2, $3, 'reading', $4)
-         ON CONFLICT (book_id) DO UPDATE SET
-           current_file = EXCLUDED.current_file,
-           cfi = EXCLUDED.cfi,
-           status = 'reading',
-           last_read_at = EXCLUDED.last_read_at`,
-        [bookIdNum, chapter, cfi || '', now]
-      );
-
-      // Update book status to reading
-      await query(
-        'UPDATE books SET status = $1, updated_at = $2 WHERE id = $3',
-        ['reading', now, bookIdNum]
+        'UPDATE books SET current_file = $1, cfi = $2, status = $3, last_read_at = $4, updated_at = $5 WHERE id = $6',
+        [chapter, cfi || '', 'reading', now, now, numericBookId]
       );
     }
 
+    // Get reading progress from books table
     const result = await query(
-      'SELECT current_file, cfi, status FROM reading_progress WHERE book_id = $1',
-      [bookIdNum]
+      'SELECT current_file, cfi, status FROM books WHERE id = $1',
+      [numericBookId]
     );
 
-    if (result.rows.length === 0) {
-      return NextResponse.json({ htmlFile: null, cfi: null, status: 'unread' });
-    }
-
-    const progress = result.rows[0];
+    const book = result.rows[0];
     return NextResponse.json({
-      htmlFile: progress.current_file,
-      cfi: progress.cfi,
-      status: progress.status,
+      htmlFile: book.current_file || null,
+      cfi: book.cfi || null,
+      status: book.status || 'unread',
     });
   } catch (error) {
     console.error('Error getting reading progress:', error);

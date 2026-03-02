@@ -898,6 +898,20 @@ export default function ReaderPage() {
   }, [selectedBlocks, rendition, currentSessionId, messages]);
 
   const handleDeleteMessage = useCallback(async (messageId: string) => {
+    // Call API to delete message from database
+    if (bookId && currentSessionId && currentChapter) {
+      try {
+        const htmlFile = currentChapter.split('#')[0];
+        const encodedHtmlFile = encodeURIComponent(htmlFile);
+        await fetch(`/api/chat/${bookId}/${encodedHtmlFile}?sessionId=${currentSessionId}&messageId=${messageId}`, {
+          method: 'DELETE',
+        });
+      } catch (err) {
+        console.error('Failed to delete message from server:', err);
+      }
+    }
+
+    // Update local state
     const newMessages = messages.filter(msg => msg.id !== messageId);
     setMessages(newMessages);
 
@@ -906,7 +920,7 @@ export default function ReaderPage() {
         s.id === currentSessionId ? { ...s, messages: newMessages, timestamp: Date.now() } : s
       ));
     }
-  }, [messages, currentSessionId, selectedBlocks]);
+  }, [messages, currentSessionId, selectedBlocks, bookId, currentChapter]);
 
   const handleCompressSubmit = useCallback(async (messageId: string, content: string) => {
     // Update the message content
@@ -937,9 +951,9 @@ export default function ReaderPage() {
     });
   }, []);
 
-  // ==================== Notes and Comments ====================
+  // ==================== Chat and Comments ====================
 
-  const loadNotesForChapter = useCallback(async (href: string) => {
+  const loadChatForChapter = useCallback(async (href: string) => {
     if (!href || !bookId) return;
     try {
       const htmlFile = href.split('#')[0];
@@ -996,13 +1010,13 @@ export default function ReaderPage() {
     }
   }, [bookId]);
 
-  // Load notes/comments when chapter changes
+  // Load chat/comments when chapter changes
   useEffect(() => {
     if (currentChapter && isContentReady) {
-      loadNotesForChapter(currentChapter);
+      loadChatForChapter(currentChapter);
       loadCommentsForChapter(currentChapter);
     }
-  }, [currentChapter, isContentReady, loadNotesForChapter, loadCommentsForChapter]);
+  }, [currentChapter, isContentReady, loadChatForChapter, loadCommentsForChapter]);
 
   // Render comments as underlines
   useEffect(() => {
@@ -1506,7 +1520,23 @@ export default function ReaderPage() {
                     setCompressMessageId(messageId);
                     setShowCompress(true);
                   }}
-                  onEditMessage={(messageId, newContent) => {
+                  onEditMessage={async (messageId, newContent) => {
+                    // Call API to update message in database
+                    if (bookId && currentChapter) {
+                      try {
+                        const htmlFile = currentChapter.split('#')[0];
+                        const encodedHtmlFile = encodeURIComponent(htmlFile);
+                        await fetch(`/api/chat/${bookId}/${encodedHtmlFile}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ messageId, content: newContent }),
+                        });
+                      } catch (err) {
+                        console.error('Failed to update message on server:', err);
+                      }
+                    }
+
+                    // Update local state
                     setMessages(prev => prev.map(msg =>
                       msg.id === messageId
                         ? {

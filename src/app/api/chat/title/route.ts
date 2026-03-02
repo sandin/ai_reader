@@ -1,21 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
-import fs from 'fs';
-import path from 'path';
-
-// Helper to decode bookId
-function decodeBookId(bookId: string): string {
-  const standardBase64 = bookId.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = standardBase64 + '=='.slice(0, (4 - standardBase64.length % 4) % 4);
-  const decodedBookId = Buffer.from(padded, 'base64').toString('utf-8');
-  return decodedBookId.replace(/\.epub$/, '');
-}
+import { query } from '@/lib/db';
+import { requireAuth } from '@/lib/auth';
 
 /**
  * 根据聊天历史生成对话标题
  */
 export async function POST(req: NextRequest) {
+  try {
+    await requireAuth(req);
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   try {
     const { bookId, htmlFile, sessionId } = await req.json();
 
@@ -36,36 +34,41 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 从服务端读取会话数据
-    const bookName = decodeBookId(bookId);
-    const htmlFileName = path.basename(htmlFile);
-    const bookNotesDir = path.join(process.cwd(), 'data', 'notes', bookName);
-    const jsonFileName = htmlFileName.replace(/\.[^/.]+$/, '') + '.json';
-    const jsonFilePath = path.join(bookNotesDir, jsonFileName);
-
-    if (!fs.existsSync(jsonFilePath)) {
-      return NextResponse.json(
-        { error: 'Session not found' },
-        { status: 404 }
-      );
+    // Parse bookId as numeric ID
+    const numericBookId = parseInt(bookId, 10);
+    if (isNaN(numericBookId)) {
+      return NextResponse.json({ error: 'Invalid book ID' }, { status: 400 });
     }
 
-    const content = fs.readFileSync(jsonFilePath, 'utf-8');
-    const data = JSON.parse(content);
-    const session = data.sessions?.find((s: { id: string }) => s.id === sessionId);
+    // Parse sessionId as numeric ID
+    const numericSessionId = parseInt(sessionId, 10);
+    if (isNaN(numericSessionId)) {
+      return NextResponse.json({ error: 'Invalid session ID' }, { status: 400 });
+    }
 
-    if (!session || !session.messages || session.messages.length === 0) {
+    // Get messages from database
+    const messagesResult = await query(
+      'SELECT role, message_content FROM chat_messages WHERE session_id = $1 ORDER BY id',
+      [numericSessionId]
+    );
+
+    if (messagesResult.rows.length === 0) {
       return NextResponse.json(
         { error: 'No messages in this session' },
         { status: 400 }
       );
     }
 
-    // 只提取第一条用户消息用于生成标题
-    const firstUserMessage = session.messages.find((msg: { role: string }) => msg.role === 'user');
-    const conversationHistory = firstUserMessage
-      ? firstUserMessage.content
-      : '';
+    // Find first user message
+    const firstUserMessage = messagesResult.rows.find((msg: { role: string }) => msg.role === 'user');
+    const conversationHistory = firstUserMessage?.message_content || '';
+
+    if (!conversationHistory) {
+      return NextResponse.json(
+        { error: 'No user message found in this session' },
+        { status: 400 }
+      );
+    }
 
     // 创建 LLM 实例
     const chat = new ChatOpenAI(modelName, {

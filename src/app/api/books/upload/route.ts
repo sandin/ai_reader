@@ -12,8 +12,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { username } = auth;
-  const userBooksDir = path.join(process.cwd(), 'data', username, 'books');
+  const { userId } = auth;
+  const userBooksDir = path.join(process.cwd(), 'data', String(userId), 'books');
 
   try {
     const formData = await request.formData();
@@ -119,7 +119,7 @@ export async function POST(request: Request) {
     }
 
     // Save to database
-    const epubPath = `${username}/books/${file.name}`;
+    const epubPath = `${userId}/books/${file.name}`;
     const now = Math.floor(Date.now());
 
     await query(

@@ -3,25 +3,6 @@ import { streamChat, parseUserMessage, classifyIntent, INTENT_PROMPTS, Intent } 
 import { query } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 
-// Helper to decode bookId (base64 encoded book key)
-function decodeBookId(bookId: string): string {
-  const standardBase64 = bookId.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = standardBase64 + '=='.slice(0, (4 - standardBase64.length % 4) % 4);
-  const decodedBookId = Buffer.from(padded, 'base64').toString('utf-8');
-  return decodedBookId.replace(/\.epub$/, '');
-}
-
-// Get book ID - supports both numeric ID and base64 encoded book key
-async function parseBookId(bookId: string): Promise<number | null> {
-  const numericId = parseInt(bookId);
-  if (!isNaN(numericId)) {
-    return numericId;
-  }
-  const bookKey = decodeBookId(bookId);
-  const result = await query('SELECT id FROM books WHERE book_key = $1', [bookKey]);
-  return result.rows[0]?.id || null;
-}
-
 // Get chat history from database
 async function getChatHistory(sessionId: number): Promise<{ role: string; content: string }[]> {
   const messagesResult = await query(
@@ -97,15 +78,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 从数据库获取历史消息（必须在保存当前消息之前）
+    const history = await getChatHistory(numericSessionId);
+
     // 保存用户消息到数据库
     const userContent = selectedText
       ? `选中文本：\n${selectedText}\n\n用户输入：${message}`
       : message;
     await saveUserMessage(numericSessionId, userContent);
     await updateSessionTimestamp(numericSessionId);
-
-    // 从数据库获取历史消息
-    const history = await getChatHistory(numericSessionId);
 
     // 分类用户意图
     const intent: Intent = await classifyIntent(message, apiKey, modelName);

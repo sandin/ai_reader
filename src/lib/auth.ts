@@ -34,7 +34,7 @@ export function verifyToken(token: string): JWTPayload | null {
 
 export async function findUserByUsername(username: string): Promise<User | null> {
   const result = await pool.query(
-    'SELECT * FROM users WHERE username = $1',
+    'SELECT * FROM public.users WHERE username = $1',
     [username]
   );
   return result.rows[0] || null;
@@ -62,6 +62,15 @@ export async function authenticateRequest(request: Request): Promise<{ userId: n
 
   const payload = verifyToken(token);
   if (!payload) return null;
+
+  // Verify user exists in database (use public schema explicitly)
+  const userResult = await pool.query(
+    'SELECT id, username FROM public.users WHERE id = $1',
+    [payload.userId]
+  );
+  if (userResult.rows.length === 0) {
+    return null;
+  }
 
   // Set current user in db context
   setCurrentUser(payload.userId);

@@ -106,13 +106,16 @@ export default function TableOfContents({
 
   // Recursive render function for tree chapters (VSCode Explorer style)
   const renderTreeChapter = useCallback((nodeList: TreeNode[], activeHref: string, level: number = 0) => {
+    // Prevent all items being active when activeHref is empty
+    const hasActiveHref = activeHref.length > 0;
+
     return nodeList.map((node) => {
       const nodeHref = node.href || '';
       // Check if current page is in this node's contents or href matches
-      const isActive = node.contents.some(c =>
+      const isActive = hasActiveHref && (node.contents.some(c =>
         activeHref.includes(c.split('#')[0].split('/').pop() || '') || c.includes(activeHref)
       ) || nodeHref.includes(activeHref.split('#')[0].split('/').pop() || '') ||
-        activeHref.includes(nodeHref.split('#')[0].split('/').pop() || '');
+        activeHref.includes(nodeHref.split('#')[0].split('/').pop() || ''));
       const hasChildren = node.children && node.children.length > 0;
       const isExpanded = expandedNodes.has(node.chapter_id);
 
@@ -190,7 +193,7 @@ export default function TableOfContents({
           ) : (
             // Fallback to flat chapters list
             chapters.map((chapter) => {
-              const isActive = currentChapter.includes(chapter.href) || chapter.href.includes(currentChapter);
+              const isActive = currentChapter.length > 0 && (currentChapter.includes(chapter.href) || chapter.href.includes(currentChapter));
               return (
                 <li key={chapter.id}>
                   <button

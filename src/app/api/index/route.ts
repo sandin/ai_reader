@@ -1,41 +1,6 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
 import { query } from '@/lib/db';
 import { authenticateRequest } from '@/lib/auth';
-
-// Helper to decode bookId (base64 encoded book key)
-function decodeBookId(bookId: string): string {
-  const standardBase64 = bookId.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = standardBase64 + '=='.slice(0, (4 - standardBase64.length % 4) % 4);
-  const decodedBookId = Buffer.from(padded, 'base64').toString('utf-8');
-  return decodedBookId.replace(/\.epub$/, '');
-}
-
-// Get book name from bookId - supports both numeric ID and base64 encoded book key
-async function getBookName(bookId: string): Promise<string | null> {
-  const numericId = parseInt(bookId);
-  if (!isNaN(numericId)) {
-    // Query by numeric ID to get book_key
-    const result = await query('SELECT book_key FROM books WHERE id = $1', [numericId]);
-    if (result.rows.length === 0) return null;
-    return result.rows[0].book_key;
-  }
-  // It's already a base64 encoded book key
-  return decodeBookId(bookId);
-}
-
-interface TreeNode {
-  chapter_id: string;
-  chapter_name: string;
-  contents: string[];
-  children: TreeNode[];
-}
-
-interface ChapterIndex {
-  tree: TreeNode[];
-  htmlOrder: string[];
-}
 
 // GET: 获取书籍的章节索引
 export async function GET(request: Request) {
@@ -55,27 +20,24 @@ export async function GET(request: Request) {
       );
     }
 
-    // Get book name from bookId (supports both numeric ID and base64 encoded)
-    const bookName = await getBookName(bookId);
-    if (!bookName) {
+    // Parse bookId as numeric ID
+    const numericBookId = parseInt(bookId, 10);
+    if (isNaN(numericBookId)) {
+      return NextResponse.json({ error: 'Invalid book ID' }, { status: 400 });
+    }
+
+    // Get index_data from database
+    const result = await query('SELECT index_data FROM books WHERE id = $1', [numericBookId]);
+    if (result.rows.length === 0) {
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
-    // Index file path
-    const notesDir = path.join(process.cwd(), 'data', 'notes', bookName);
-    const indexFilePath = path.join(notesDir, 'index.json');
-
-    if (!fs.existsSync(indexFilePath)) {
+    const indexData = result.rows[0].index_data;
+    if (!indexData) {
       return NextResponse.json({ tree: [], htmlOrder: [] });
     }
 
-    try {
-      const content = fs.readFileSync(indexFilePath, 'utf-8');
-      const indexData = JSON.parse(content);
-      return NextResponse.json(indexData);
-    } catch (e) {
-      return NextResponse.json({ tree: [], htmlOrder: [] });
-    }
+    return NextResponse.json(indexData);
   } catch (error) {
     console.error('Error getting book index:', error);
     return NextResponse.json(
@@ -103,33 +65,26 @@ export async function POST(request: Request) {
       );
     }
 
-    // Get book name from bookId (supports both numeric ID and base64 encoded)
-    const bookName = await getBookName(bookId);
-    if (!bookName) {
-      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
+    // Parse bookId as numeric ID
+    const numericBookId = parseInt(bookId, 10);
+    if (isNaN(numericBookId)) {
+      return NextResponse.json({ error: 'Invalid book ID' }, { status: 400 });
     }
 
-    // Notes directory
-    const notesDir = path.join(process.cwd(), 'data', 'notes', bookName);
-
-    // Create directory if it doesn't exist
-    if (!fs.existsSync(notesDir)) {
-      fs.mkdirSync(notesDir, { recursive: true });
-    }
-
-    // Build index with tree structure and html order
-    const index: ChapterIndex = {
+    // Build index object
+    const indexData = {
       tree,
       htmlOrder: htmlOrder || [],
     };
 
-    // Write index to file
-    const indexFilePath = path.join(notesDir, 'index.json');
-    fs.writeFileSync(indexFilePath, JSON.stringify(index, null, 2), 'utf-8');
+    // Save to database
+    await query(
+      'UPDATE books SET index_data = $1 WHERE id = $2',
+      [JSON.stringify(indexData), numericBookId]
+    );
 
     return NextResponse.json({
       success: true,
-      bookName,
       treeSize: tree.length,
       htmlOrderSize: htmlOrder?.length || 0,
     });

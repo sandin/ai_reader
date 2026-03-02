@@ -4,28 +4,6 @@ import path from 'path';
 import { query } from '@/lib/db';
 import { authenticateRequest } from '@/lib/auth';
 
-// Helper to decode bookId (base64 encoded book key)
-function decodeBookId(bookId: string): string {
-  const standardBase64 = bookId.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = standardBase64 + '=='.slice(0, (4 - standardBase64.length % 4) % 4);
-  const decodedBookId = Buffer.from(padded, 'base64').toString('utf-8');
-  return decodedBookId.replace(/\.epub$/, '');
-}
-
-// Get book - supports both numeric ID and base64 encoded book key
-async function getBook(idOrKey: string): Promise<any> {
-  const numericId = parseInt(idOrKey);
-  if (!isNaN(numericId)) {
-    // Query by numeric ID
-    const result = await query('SELECT * FROM books WHERE id = $1', [numericId]);
-    return result.rows[0] || null;
-  }
-  // Query by book_key (base64 encoded)
-  const bookKey = decodeBookId(idOrKey);
-  const result = await query('SELECT * FROM books WHERE book_key = $1', [bookKey]);
-  return result.rows[0] || null;
-}
-
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -38,12 +16,20 @@ export async function GET(
 
     const { id } = await params;
 
-    // Get book by ID or book_key
-    const book = await getBook(id);
+    // Parse id as numeric ID
+    const numericId = parseInt(id, 10);
+    if (isNaN(numericId)) {
+      return NextResponse.json({ error: 'Invalid book ID' }, { status: 400 });
+    }
 
-    if (!book) {
+    // Get book by numeric ID
+    const result = await query('SELECT * FROM books WHERE id = $1', [numericId]);
+
+    if (result.rows.length === 0) {
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
+
+    const book = result.rows[0];
     const filepath = path.join(process.cwd(), 'data', book.epub_path);
 
     if (!fs.existsSync(filepath)) {
@@ -53,15 +39,8 @@ export async function GET(
     const bookBuffer = fs.readFileSync(filepath);
     const bookBase64 = bookBuffer.toString('base64');
 
-    // Generate legacy ID for backward compatibility
-    const legacyId = Buffer.from(book.book_key).toString('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
-
     return NextResponse.json({
       id: book.id,
-      legacyId,
       filename: book.filename,
       title: book.title,
       content: bookBase64,
