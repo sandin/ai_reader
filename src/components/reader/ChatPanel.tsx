@@ -348,7 +348,7 @@ export default function ChatPanel({
                     <div className="text-[#3a3a3a] px-2">
                       {msg.role === 'assistant' ? (
                         <MessageContent
-                          content={msg.blocks.map(b => b.content).join('\n\n')}
+                          content={msg.content}
                           isStreaming={aiLoading && index === messages.length - 1}
                           fontSize={fontSize}
                           fontFamily={fontFamily}
@@ -357,7 +357,7 @@ export default function ChatPanel({
                         />
                       ) : (
                         <UserMessageContent
-                          content={msg.blocks.map(b => b.content).join('\n\n')}
+                          content={msg.content}
                           index={index}
                           fontSize={fontSize}
                           fontFamily={fontFamily}
@@ -370,7 +370,7 @@ export default function ChatPanel({
                       {msg.role === 'assistant' && (
                         <button
                           onClick={() => {
-                            const content = msg.blocks.map(b => b.content).join('\n\n');
+                            const content = msg.content;
                             onOpenCompress?.(content, msg.id);
                           }}
                           className="w-5 h-5 flex items-center justify-center rounded text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 transition-colors"
@@ -384,7 +384,7 @@ export default function ChatPanel({
                       {msg.role === 'user' && (
                         <button
                           onClick={() => {
-                            const content = msg.blocks.map(b => b.content).join('\n\n');
+                            const content = msg.content;
                             setEditingMessage({ id: msg.id, content });
                           }}
                           className="w-5 h-5 flex items-center justify-center rounded text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 transition-colors"
@@ -397,7 +397,7 @@ export default function ChatPanel({
                       )}
                       <button
                         onClick={() => {
-                          const content = msg.blocks.map(b => b.content).join('\n\n');
+                          const content = msg.content;
                           navigator.clipboard.writeText(content);
                           setCopiedMessageId(msg.id);
                           setTimeout(() => setCopiedMessageId(null), 2000);

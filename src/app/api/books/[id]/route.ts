@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { query } from '@/lib/db';
+import { authenticateRequest, requireAuth } from '@/lib/auth';
 
 // Decode URL-safe base64 to get original filename
 function decodeBookId(id: string): string {
@@ -16,28 +18,46 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let auth;
+  try {
+    auth = await requireAuth(request);
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const { username } = auth;
   const { id } = await params;
-  const booksDir = path.join(process.cwd(), 'data', 'books');
-  const notesDir = path.join(process.cwd(), 'data', 'notes');
 
   try {
-    const filename = decodeBookId(id);
-    const filePath = path.join(booksDir, filename);
+    // Decode book key from URL-safe base64
+    const bookKey = decodeBookId(id).replace('.epub', '');
 
-    // Check if file exists
-    if (!fs.existsSync(filePath)) {
+    // Get book from database
+    const result = await query(
+      'SELECT * FROM books WHERE book_key = $1',
+      [bookKey]
+    );
+
+    if (result.rows.length === 0) {
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
-    // Delete the epub file
-    fs.unlinkSync(filePath);
+    const book = result.rows[0];
 
-    // Delete the notes directory for this book (if exists)
-    const bookName = filename.replace('.epub', '');
-    const bookNotesDir = path.join(notesDir, bookName);
-    if (fs.existsSync(bookNotesDir)) {
-      fs.rmSync(bookNotesDir, { recursive: true, force: true });
+    // Delete the epub file
+    const filePath = path.join(process.cwd(), 'data', book.epub_path);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
     }
+
+    // Delete notes directory
+    const notesDir = path.join(process.cwd(), 'data', username, 'notes', bookKey);
+    if (fs.existsSync(notesDir)) {
+      fs.rmSync(notesDir, { recursive: true, force: true });
+    }
+
+    // Delete from database (cascade will handle related records)
+    await query('DELETE FROM books WHERE id = $1', [book.id]);
 
     return NextResponse.json({
       success: true,
@@ -53,9 +73,15 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let auth;
+  try {
+    auth = await requireAuth(request);
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const { username } = auth;
   const { id } = await params;
-  const booksDir = path.join(process.cwd(), 'data', 'books');
-  const notesDir = path.join(process.cwd(), 'data', 'notes');
 
   try {
     const body = await request.json();
@@ -65,33 +91,56 @@ export async function PATCH(
       return NextResponse.json({ error: 'New name is required' }, { status: 400 });
     }
 
-    const oldFilename = decodeBookId(id);
-    const oldBookName = oldFilename.replace('.epub', '');
+    // Decode book key from URL-safe base64
+    const oldBookKey = decodeBookId(id).replace('.epub', '');
     const newFilename = newName.endsWith('.epub') ? newName : `${newName}.epub`;
-    const newBookName = newName.endsWith('.epub') ? newName.replace('.epub', '') : newName;
+    const newBookKey = newName.endsWith('.epub') ? newName.replace('.epub', '') : newName;
 
-    const oldFilePath = path.join(booksDir, oldFilename);
-    const newFilePath = path.join(booksDir, newFilename);
+    // Get book from database
+    const result = await query(
+      'SELECT * FROM books WHERE book_key = $1',
+      [oldBookKey]
+    );
 
-    // Check if old file exists
-    if (!fs.existsSync(oldFilePath)) {
+    if (result.rows.length === 0) {
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
-    // Check if new filename already exists
-    if (fs.existsSync(newFilePath)) {
+    const book = result.rows[0];
+
+    // Check if new book key already exists
+    const existingBook = await query(
+      'SELECT id FROM books WHERE book_key = $1',
+      [newBookKey]
+    );
+
+    if (existingBook.rows.length > 0) {
       return NextResponse.json({ error: 'A book with this name already exists' }, { status: 409 });
     }
 
     // Rename the epub file
-    fs.renameSync(oldFilePath, newFilePath);
+    const oldFilePath = path.join(process.cwd(), 'data', book.epub_path);
+    const newFilePath = path.join(process.cwd(), 'data', `${username}/books/${newFilename}`);
 
-    // Rename the notes directory (if exists)
-    const oldNotesDir = path.join(notesDir, oldBookName);
-    const newNotesDir = path.join(notesDir, newBookName);
+    if (fs.existsSync(oldFilePath)) {
+      fs.renameSync(oldFilePath, newFilePath);
+    }
+
+    // Rename notes directory
+    const oldNotesDir = path.join(process.cwd(), 'data', username, 'notes', oldBookKey);
+    const newNotesDir = path.join(process.cwd(), 'data', username, 'notes', newBookKey);
     if (fs.existsSync(oldNotesDir)) {
       fs.renameSync(oldNotesDir, newNotesDir);
     }
+
+    // Update database
+    const newEpubPath = `${username}/books/${newFilename}`;
+    const now = Math.floor(Date.now());
+
+    await query(
+      `UPDATE books SET book_key = $1, title = $2, filename = $3, epub_path = $4, updated_at = $5 WHERE id = $6`,
+      [newBookKey, newBookKey, newFilename, newEpubPath, now, book.id]
+    );
 
     // Generate new ID
     const newId = Buffer.from(newFilename).toString('base64')
@@ -104,7 +153,7 @@ export async function PATCH(
       message: 'Book renamed successfully',
       newId,
       newFilename,
-      newTitle: newBookName
+      newTitle: newBookKey
     });
   } catch (error) {
     console.error('Error renaming book:', error);

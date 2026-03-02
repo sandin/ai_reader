@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     // 只提取第一条用户消息用于生成标题
     const firstUserMessage = session.messages.find((msg: { role: string }) => msg.role === 'user');
     const conversationHistory = firstUserMessage
-      ? firstUserMessage.blocks.map((b: { content: string }) => b.content).join('\n\n')
+      ? firstUserMessage.content
       : '';
 
     // 创建 LLM 实例

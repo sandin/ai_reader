@@ -1,8 +1,40 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
+import { authenticateRequest, requireAuth } from '@/lib/auth';
+
+// Helper to decode bookId (base64 encoded book key)
+function decodeBookId(bookId: string): string {
+  const standardBase64 = bookId.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = standardBase64 + '=='.slice(0, (4 - standardBase64.length % 4) % 4);
+  const decodedBookId = Buffer.from(padded, 'base64').toString('utf-8');
+  return decodedBookId.replace(/\.epub$/, '');
+}
+
+// Get book ID - supports both numeric ID and base64 encoded book key
+async function parseBookId(bookId: string): Promise<number | null> {
+  const numericId = parseInt(bookId);
+  if (!isNaN(numericId)) {
+    return numericId;
+  }
+  const bookKey = decodeBookId(bookId);
+  const result = await query('SELECT id FROM books WHERE book_key = $1', [bookKey]);
+  return result.rows[0]?.id || null;
+}
+
+// Get book key from numeric ID
+async function getBookKey(bookId: number): Promise<string | null> {
+  const result = await query('SELECT book_key FROM books WHERE id = $1', [bookId]);
+  return result.rows[0]?.book_key || null;
+}
 
 export async function POST(request: Request) {
+  let auth;
+  try {
+    auth = await requireAuth(request);
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   try {
     const body = await request.json();
     const { bookId, chapter, cfi } = body;
@@ -14,43 +46,39 @@ export async function POST(request: Request) {
       );
     }
 
-    // Decode bookId from URL-safe base64 to original book name
-    const standardBase64 = bookId.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = standardBase64 + '=='.slice(0, (4 - standardBase64.length % 4) % 4);
-    const decodedBookId = Buffer.from(padded, 'base64').toString('utf-8');
-    const bookName = decodedBookId.replace(/\.epub$/, '');
+    // Parse bookId (supports both numeric ID and base64 encoded)
+    const bookIdNum = await parseBookId(bookId);
 
-    // Notes directory at project root
-    const notesDir = path.join(process.cwd(), 'data', 'notes');
-
-    // Create notes directory if it doesn't exist
-    if (!fs.existsSync(notesDir)) {
-      fs.mkdirSync(notesDir, { recursive: true });
+    if (!bookIdNum) {
+      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
-    // Book-specific directory
-    const bookNotesDir = path.join(notesDir, bookName);
-    if (!fs.existsSync(bookNotesDir)) {
-      fs.mkdirSync(bookNotesDir, { recursive: true });
-    }
+    // Get book key for response
+    const bookKey = await getBookKey(bookIdNum);
 
-    // Bookmark file path (per-book)
-    const bookmarkFilePath = path.join(bookNotesDir, 'bookmark.json');
+    const now = Math.floor(Date.now());
 
-    // Save simplified bookmark data (chapter info is in index.json)
-    const bookmarkData = {
-      htmlFile: chapter, // Just save the HTML file name
-      cfi: cfi || '',
-      status: 'reading', // unread, reading, completed
-      timestamp: Date.now(),
-    };
+    // Upsert reading progress
+    await query(
+      `INSERT INTO reading_progress (book_id, current_file, cfi, status, last_read_at)
+       VALUES ($1, $2, $3, 'reading', $4)
+       ON CONFLICT (book_id) DO UPDATE SET
+         current_file = EXCLUDED.current_file,
+         cfi = EXCLUDED.cfi,
+         status = 'reading',
+         last_read_at = EXCLUDED.last_read_at`,
+      [bookIdNum, chapter, cfi || '', now]
+    );
 
-    // Write to JSON file
-    fs.writeFileSync(bookmarkFilePath, JSON.stringify(bookmarkData, null, 2), 'utf-8');
+    // Update book status to reading
+    await query(
+      'UPDATE books SET status = $1, updated_at = $2 WHERE id = $3',
+      ['reading', now, bookIdNum]
+    );
 
     return NextResponse.json({
       success: true,
-      bookName,
+      bookKey,
       chapter,
     });
   } catch (error) {
@@ -63,6 +91,13 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  let auth;
+  try {
+    auth = await requireAuth(request);
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   try {
     const body = await request.json();
     const { bookId, status } = body;
@@ -81,35 +116,29 @@ export async function PATCH(request: Request) {
       );
     }
 
-    // Decode bookId from URL-safe base64 to original book name
-    const standardBase64 = bookId.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = standardBase64 + '=='.slice(0, (4 - standardBase64.length % 4) % 4);
-    const decodedBookId = Buffer.from(padded, 'base64').toString('utf-8');
-    const bookName = decodedBookId.replace(/\.epub$/, '');
+    const bookIdNum = await parseBookId(bookId);
 
-    // Bookmark file path (per-book)
-    const bookmarkFilePath = path.join(process.cwd(), 'data', 'notes', bookName, 'bookmark.json');
-
-    let bookmarkData = { status: 'unread', timestamp: Date.now() };
-    if (fs.existsSync(bookmarkFilePath)) {
-      try {
-        const content = fs.readFileSync(bookmarkFilePath, 'utf-8');
-        bookmarkData = JSON.parse(content);
-      } catch (e) {
-        // Use default
-      }
+    if (!bookIdNum) {
+      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
-    bookmarkData.status = status;
-    bookmarkData.timestamp = Date.now();
+    const now = Math.floor(Date.now());
 
-    // Ensure directory exists
-    const bookNotesDir = path.join(process.cwd(), 'data', 'notes', bookName);
-    if (!fs.existsSync(bookNotesDir)) {
-      fs.mkdirSync(bookNotesDir, { recursive: true });
-    }
+    // Update reading progress status
+    await query(
+      `INSERT INTO reading_progress (book_id, status, last_read_at)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (book_id) DO UPDATE SET
+         status = EXCLUDED.status,
+         last_read_at = EXCLUDED.last_read_at`,
+      [bookIdNum, status, now]
+    );
 
-    fs.writeFileSync(bookmarkFilePath, JSON.stringify(bookmarkData, null, 2), 'utf-8');
+    // Update book status
+    await query(
+      'UPDATE books SET status = $1, updated_at = $2 WHERE id = $3',
+      [status, now, bookIdNum]
+    );
 
     return NextResponse.json({ success: true, status });
   } catch (error) {
@@ -123,8 +152,16 @@ export async function PATCH(request: Request) {
 
 export async function GET(request: Request) {
   try {
+    const auth = await authenticateRequest(request);
+    if (!auth) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const bookId = searchParams.get('bookId');
+    // Optional parameters to update progress while getting
+    const chapter = searchParams.get('chapter');
+    const cfi = searchParams.get('cfi');
 
     if (!bookId) {
       return NextResponse.json(
@@ -133,27 +170,49 @@ export async function GET(request: Request) {
       );
     }
 
-    // Decode bookId from URL-safe base64 to original book name
-    const standardBase64 = bookId.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = standardBase64 + '=='.slice(0, (4 - standardBase64.length % 4) % 4);
-    const decodedBookId = Buffer.from(padded, 'base64').toString('utf-8');
-    const bookName = decodedBookId.replace(/\.epub$/, '');
+    const bookIdNum = await parseBookId(bookId);
 
-    // Bookmark file path (per-book)
-    const bookmarkFilePath = path.join(process.cwd(), 'data', 'notes', bookName, 'bookmark.json');
-
-    if (!fs.existsSync(bookmarkFilePath)) {
-      return NextResponse.json({ htmlFile: null, cfi: null });
+    if (!bookIdNum) {
+      return NextResponse.json({ htmlFile: null, cfi: null, status: 'unread' });
     }
 
-    try {
-      const content = fs.readFileSync(bookmarkFilePath, 'utf-8');
-      const bookmarkData = JSON.parse(content);
+    const now = Math.floor(Date.now());
 
-      return NextResponse.json(bookmarkData);
-    } catch (e) {
-      return NextResponse.json({ htmlFile: null, cfi: null });
+    // If chapter and cfi are provided, update progress while getting
+    if (chapter) {
+      await query(
+        `INSERT INTO reading_progress (book_id, current_file, cfi, status, last_read_at)
+         VALUES ($1, $2, $3, 'reading', $4)
+         ON CONFLICT (book_id) DO UPDATE SET
+           current_file = EXCLUDED.current_file,
+           cfi = EXCLUDED.cfi,
+           status = 'reading',
+           last_read_at = EXCLUDED.last_read_at`,
+        [bookIdNum, chapter, cfi || '', now]
+      );
+
+      // Update book status to reading
+      await query(
+        'UPDATE books SET status = $1, updated_at = $2 WHERE id = $3',
+        ['reading', now, bookIdNum]
+      );
     }
+
+    const result = await query(
+      'SELECT current_file, cfi, status FROM reading_progress WHERE book_id = $1',
+      [bookIdNum]
+    );
+
+    if (result.rows.length === 0) {
+      return NextResponse.json({ htmlFile: null, cfi: null, status: 'unread' });
+    }
+
+    const progress = result.rows[0];
+    return NextResponse.json({
+      htmlFile: progress.current_file,
+      cfi: progress.cfi,
+      status: progress.status,
+    });
   } catch (error) {
     console.error('Error getting reading progress:', error);
     return NextResponse.json(

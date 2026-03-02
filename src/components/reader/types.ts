@@ -30,7 +30,7 @@ export interface Block {
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
-  blocks: Block[];
+  content: string;
   timestamp: number;
 }
 

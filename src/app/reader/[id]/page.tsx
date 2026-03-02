@@ -131,8 +131,8 @@ export default function ReaderPage() {
   const viewerRef = useRef<HTMLDivElement>(null);
   const selectionHandlerAdded = useRef(false);
   const saveProgressTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const prevSelectedBlocksRef = useRef<string>('');
   const savedCfiRef = useRef<string | null>(null);
+  const isInitialLocationRef = useRef(true); // Track if this is the initial location (don't save)
 
   // ==================== Initialization ====================
 
@@ -401,6 +401,12 @@ export default function ReaderPage() {
       setCurrentChapter(href);
       const cfi = location.start.cfi;
 
+      // Skip saving on initial location to avoid duplicate API calls
+      if (isInitialLocationRef.current) {
+        isInitialLocationRef.current = false;
+        return;
+      }
+
       if (saveProgressTimeoutRef.current) clearTimeout(saveProgressTimeoutRef.current);
       saveProgressTimeoutRef.current = setTimeout(() => {
         const htmlFile = href.split('#')[0];
@@ -572,23 +578,7 @@ export default function ReaderPage() {
   // ==================== Chat ====================
 
   const handleSendMessage = async (input: string, isFirstMessage: boolean) => {
-    if (!input.trim() || aiLoading) return;
-
-    let userContent = input;
-    if (isFirstMessage && selectedBlocks.length > 0) {
-      const selectedText = selectedBlocks.map(b => b.content).join('\n\n');
-      userContent = `选中文本：\n${selectedText}\n\n用户输入：${input}`;
-    }
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      blocks: [{ id: Date.now().toString(), content: userContent, timestamp: Date.now() }],
-      timestamp: Date.now(),
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    setAiLoading(true);
+    if (!input.trim() || aiLoading || !currentSessionId) return;
 
     // Save to history
     if (input.trim()) {
@@ -597,48 +587,42 @@ export default function ReaderPage() {
       localStorage.setItem('ai-chat-input-history', JSON.stringify(newHistory));
     }
 
+    // Prepare message - include selected text if first message
+    let message = input;
+    let selectedTextForApi = '';
+    if (isFirstMessage && selectedBlocks.length > 0) {
+      selectedTextForApi = selectedBlocks.map(b => b.content).join('\n\n');
+    }
+
+    // Optimistically add user message to UI
+    const tempUserMessageId = `temp-${Date.now()}`;
+    const tempAssistantMessageId = `temp-${Date.now() + 1}`;
+    const userMessage: Message = {
+      id: tempUserMessageId,
+      role: 'user',
+      content: selectedTextForApi ? `选中文本：\n${selectedTextForApi}\n\n用户输入：${input}` : input,
+      timestamp: Date.now(),
+    };
+    const assistantMessage: Message = {
+      id: tempAssistantMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+    };
+
+    setMessages(prev => [...prev, userMessage, assistantMessage]);
+    setAiLoading(true);
+
     try {
-      const history = messages.map(msg => ({
-        role: msg.role,
-        content: msg.blocks.map(b => b.content).join('\n\n'),
-      }));
-
-      const assistantMessageId = (Date.now() + 1).toString();
-      const assistantMessage: Message = {
-        id: assistantMessageId,
-        role: 'assistant',
-        blocks: [{ id: assistantMessageId, content: '', timestamp: Date.now() }],
-        timestamp: Date.now(),
-      };
-
-      const newMessages = [...messages, userMessage, assistantMessage];
-      setMessages(newMessages);
-
-      // Create/update session
-      let sessionId = currentSessionId;
-      if (!sessionId) {
-        sessionId = Date.now().toString();
-        setCurrentSessionId(sessionId);
-        const newSession: Session = {
-          id: sessionId,
-          title: `对话 ${sessions.length + 1}`,
-          selectedBlocks,
-          messages: newMessages,
-          timestamp: Date.now(),
-          created_at: Date.now(),
-        };
-        setSessions(prev => [...prev, newSession]);
-      } else {
-        setSessions(prev => prev.map(s =>
-          s.id === sessionId ? { ...s, messages: newMessages, timestamp: Date.now() } : s
-        ));
-      }
-
-      // Stream response
+      // Send to server - server will save message and return streaming response
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userContent, history }),
+        body: JSON.stringify({
+          sessionId: currentSessionId,
+          message: input,
+          selectedText: selectedTextForApi || undefined,
+        }),
       });
 
       if (!response.body) throw new Error('No response body');
@@ -664,8 +648,8 @@ export default function ReaderPage() {
               if (parsed.content) {
                 accumulatedContent += parsed.content;
                 setMessages(prev => prev.map(msg =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, blocks: [{ ...msg.blocks[0], content: accumulatedContent }] }
+                  msg.id === tempAssistantMessageId
+                    ? { ...msg, content: accumulatedContent }
                     : msg
                 ));
               }
@@ -674,25 +658,14 @@ export default function ReaderPage() {
         }
       }
 
-      // Update session with final messages
-      const finalMessages = newMessages.map(msg =>
-        msg.id === assistantMessageId
-          ? { ...msg, blocks: [{ ...msg.blocks[0], content: accumulatedContent }] }
-          : msg
-      );
-
-      if (sessionId) {
-        setSessions(prev => prev.map(s =>
-          s.id === sessionId ? { ...s, messages: finalMessages, timestamp: Date.now() } : s
-        ));
-        await saveCurrentSession(finalMessages);
-      }
+      // Reload session from server to get updated messages (with IDs from DB)
+      await reloadCurrentSession();
     } catch (err) {
       console.error('Error calling LLM:', err);
       const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: `error-${Date.now()}`,
         role: 'assistant',
-        blocks: [{ id: (Date.now() + 1).toString(), content: `抱歉，调用 AI 服务失败：${err}`, timestamp: Date.now() }],
+        content: `抱歉，调用 AI 服务失败：${err}`,
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, errorMessage]);
@@ -701,24 +674,69 @@ export default function ReaderPage() {
     }
   };
 
+  // Reload current session from server
+  const reloadCurrentSession = useCallback(async () => {
+    if (!currentSessionId || !bookId || !currentChapter) return;
+    try {
+      const htmlFile = currentChapter.split('#')[0];
+      const encodedHtmlFile = encodeURIComponent(htmlFile);
+      const res = await fetch(`/api/chat/${bookId}/${encodedHtmlFile}?sessionId=${currentSessionId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.sessions?.length > 0) {
+          const session = data.sessions.find((s: any) => String(s.id) === String(currentSessionId));
+          if (session) {
+            setMessages(session.messages || []);
+            setSessions(prev => prev.map(s =>
+              String(s.id) === String(currentSessionId) ? { ...s, messages: session.messages || [] } : s
+            ));
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to reload session:', err);
+    }
+  }, [currentSessionId, bookId, currentChapter]);
+
   // ==================== Session Management ====================
 
-  const createNewSession = useCallback(() => {
+  const createNewSession = useCallback(async () => {
+    if (!bookId || !currentChapter) return;
     clearHighlights();
-    const newSessionId = Date.now().toString();
-    setCurrentSessionId(newSessionId);
-    setMessages([]);
-    setSelectedBlocks([]);
-    const newSession: Session = {
-      id: newSessionId,
-      title: `对话 ${sessions.length + 1}`,
-      selectedBlocks: [],
-      messages: [],
-      timestamp: Date.now(),
-      created_at: Date.now(),
-    };
-    setSessions(prev => [...prev, newSession]);
-  }, [sessions.length]);
+
+    try {
+      const htmlFile = currentChapter.split('#')[0];
+      const encodedHtmlFile = encodeURIComponent(htmlFile);
+      const res = await fetch(`/api/chat/${bookId}/${encodedHtmlFile}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create',
+          title: `对话 ${sessions.length + 1}`,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.session) {
+          const newSession: Session = {
+            id: String(data.session.id),
+            title: data.session.title,
+            selectedBlocks: data.session.selectedBlocks || [],
+            messages: data.session.messages || [],
+            timestamp: data.session.timestamp,
+            created_at: data.session.created_at,
+          };
+          setSessions(prev => [...prev, newSession]);
+          setCurrentSessionId(String(data.session.id));
+          setMessages([]);
+          setSelectedBlocks([]);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create session:', err);
+    }
+  }, [bookId, currentChapter, sessions.length]);
 
   const switchToSession = useCallback((sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId);
@@ -739,7 +757,7 @@ export default function ReaderPage() {
       const htmlFile = currentChapter.split('#')[0];
       const encodedHtmlFile = encodeURIComponent(htmlFile);
       try {
-        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
+        await fetch(`/api/chat/${bookId}/${encodedHtmlFile}`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionId }),
@@ -780,7 +798,7 @@ export default function ReaderPage() {
       const htmlFile = currentChapter.split('#')[0];
       const encodedHtmlFile = encodeURIComponent(htmlFile);
       try {
-        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
+        const res = await fetch(`/api/chat/${bookId}/${encodedHtmlFile}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -790,6 +808,19 @@ export default function ReaderPage() {
             title: editingSessionTitle.trim(),
           }),
         });
+        if (res.ok) {
+          const data = await res.json();
+          // If backend returns a different sessionId, update local state
+          if (data.sessionId && String(data.sessionId) !== editingSessionId) {
+            const newId = String(data.sessionId);
+            setSessions(prev => prev.map(s =>
+              s.id === editingSessionId ? { ...s, id: newId } : s
+            ));
+            if (currentSessionId === editingSessionId) {
+              setCurrentSessionId(newId);
+            }
+          }
+        }
       } catch (err) { /* ignore */ }
     }
 
@@ -863,7 +894,6 @@ export default function ReaderPage() {
       setSessions(prev => prev.map(s =>
         s.id === currentSessionId ? { ...s, selectedBlocks: newSelectedBlocks, timestamp: Date.now() } : s
       ));
-      await saveCurrentSession(messages, newSelectedBlocks);
     }
   }, [selectedBlocks, rendition, currentSessionId, messages]);
 
@@ -875,7 +905,6 @@ export default function ReaderPage() {
       setSessions(prev => prev.map(s =>
         s.id === currentSessionId ? { ...s, messages: newMessages, timestamp: Date.now() } : s
       ));
-      await saveCurrentSession(newMessages, selectedBlocks);
     }
   }, [messages, currentSessionId, selectedBlocks]);
 
@@ -885,7 +914,7 @@ export default function ReaderPage() {
       if (msg.id === messageId) {
         return {
           ...msg,
-          blocks: [{ id: `${messageId}-block`, content, timestamp: Date.now() }]
+          content
         };
       }
       return msg;
@@ -896,7 +925,6 @@ export default function ReaderPage() {
       setSessions(prev => prev.map(s =>
         s.id === currentSessionId ? { ...s, messages: newMessages, timestamp: Date.now() } : s
       ));
-      await saveCurrentSession(newMessages, selectedBlocks);
     }
   }, [messages, currentSessionId, selectedBlocks]);
 
@@ -916,7 +944,7 @@ export default function ReaderPage() {
     try {
       const htmlFile = href.split('#')[0];
       const encodedHtmlFile = encodeURIComponent(htmlFile);
-      const res = await fetch(`/api/note/${bookId}/${encodedHtmlFile}`);
+      const res = await fetch(`/api/chat/${bookId}/${encodedHtmlFile}`);
       if (res.ok) {
         const data = await res.json();
         if (data.sessions?.length > 0) {
@@ -950,7 +978,7 @@ export default function ReaderPage() {
     try {
       const htmlFile = href.split('#')[0];
       const encodedHtmlFile = encodeURIComponent(htmlFile);
-      const res = await fetch(`/api/note/${bookId}/${encodedHtmlFile}`);
+      const res = await fetch(`/api/comment/${bookId}/${encodedHtmlFile}`);
       const data = await res.json();
 
       const currentChapterFile = htmlFile.split('/').pop() || htmlFile;
@@ -967,48 +995,6 @@ export default function ReaderPage() {
       setComments([]);
     }
   }, [bookId]);
-
-  const saveCurrentSession = useCallback(async (msgs?: Message[], blocks?: Block[]) => {
-    if (!currentSessionId || !bookId || !currentChapter) return;
-    const messagesToUse = msgs ?? messages;
-    const blocksToUse = blocks ?? selectedBlocks;
-    const currentSession = sessions.find(s => s.id === currentSessionId);
-    const title = currentSession?.title || '';
-    const created_at = currentSession?.created_at || Date.now();
-
-    try {
-      const htmlFile = currentChapter.split('#')[0];
-      const encodedHtmlFile = encodeURIComponent(htmlFile);
-      await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: currentSessionId,
-          title,
-          selectedBlocks: blocksToUse,
-          messages: messagesToUse,
-          created_at,
-        }),
-      });
-    } catch (err) {
-      console.error('Failed to save session:', err);
-    }
-  }, [bookId, currentChapter, currentSessionId, messages, selectedBlocks, sessions]);
-
-  // Auto-save selectedBlocks changes
-  useEffect(() => {
-    if (!currentSessionId || !bookId || !currentChapter) return;
-    const currentBlocksKey = JSON.stringify(selectedBlocks.map(b => ({ id: b.id, content: b.content })));
-    if (prevSelectedBlocksRef.current === '') {
-      prevSelectedBlocksRef.current = currentBlocksKey;
-      return;
-    }
-    if (prevSelectedBlocksRef.current === currentBlocksKey) return;
-    prevSelectedBlocksRef.current = currentBlocksKey;
-
-    const timer = setTimeout(() => saveCurrentSession(messages, selectedBlocks), 500);
-    return () => clearTimeout(timer);
-  }, [currentSessionId, bookId, currentChapter, selectedBlocks, messages, saveCurrentSession]);
 
   // Load notes/comments when chapter changes
   useEffect(() => {
@@ -1057,30 +1043,48 @@ export default function ReaderPage() {
     highlightBlock(newBlock);
     setShowContextMenu(false);
 
-    let sessionId = currentSessionId;
-    if (!sessionId) {
-      sessionId = Date.now().toString();
-      setCurrentSessionId(sessionId);
-      const newSession: Session = {
-        id: sessionId,
-        title: `对话 ${sessions.length + 1}`,
-        selectedBlocks: newSelectedBlocks,
-        messages: [],
-        timestamp: Date.now(),
-        created_at: Date.now(),
-      };
-      setSessions(prev => [...prev, newSession]);
-    }
-
-    if (currentChapter && bookId) {
+    // If no current session, create one via API
+    if (!currentSessionId && currentChapter && bookId) {
       const htmlFile = currentChapter.split('#')[0];
       const encodedHtmlFile = encodeURIComponent(htmlFile);
       try {
-        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
+        const res = await fetch(`/api/chat/${bookId}/${encodedHtmlFile}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            sessionId: currentSessionId || sessionId,
+            action: 'create',
+            title: `对话 ${sessions.length + 1}`,
+            selectedBlocks: newSelectedBlocks,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.session) {
+            const newSession: Session = {
+              id: String(data.session.id),
+              title: data.session.title,
+              selectedBlocks: newSelectedBlocks,
+              messages: [],
+              timestamp: data.session.timestamp,
+              created_at: data.session.created_at,
+            };
+            setSessions(prev => [...prev, newSession]);
+            setCurrentSessionId(String(data.session.id));
+          }
+        }
+      } catch (err) {
+        console.error('Failed to create session:', err);
+      }
+    } else if (currentChapter && bookId) {
+      // Save to existing session
+      const htmlFile = currentChapter.split('#')[0];
+      const encodedHtmlFile = encodeURIComponent(htmlFile);
+      try {
+        await fetch(`/api/chat/${bookId}/${encodedHtmlFile}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: currentSessionId,
             selectedBlocks: newSelectedBlocks,
             messages,
           }),
@@ -1090,7 +1094,7 @@ export default function ReaderPage() {
   };
 
   const handleAddToAssistantNewChat = async () => {
-    if (!contextMenuSelection || !rendition) return;
+    if (!contextMenuSelection || !rendition || !bookId || !currentChapter) return;
     const blockId = Date.now().toString();
     const newBlock: Block = {
       id: blockId,
@@ -1099,24 +1103,44 @@ export default function ReaderPage() {
       cfiRange: contextMenuCfiRange,
     };
 
-    const newSessionId = Date.now().toString();
     const newSelectedBlocks = [newBlock];
 
-    setCurrentSessionId(newSessionId);
-    setMessages([]);
-    setSelectedBlocks(newSelectedBlocks);
-    refreshHighlights(newSelectedBlocks);
+    // Call API to create new session
+    const htmlFile = currentChapter.split('#')[0];
+    const encodedHtmlFile = encodeURIComponent(htmlFile);
+    try {
+      const res = await fetch(`/api/chat/${bookId}/${encodedHtmlFile}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create',
+          title: `对话 ${sessions.length + 1}`,
+          selectedBlocks: newSelectedBlocks,
+        }),
+      });
 
-    const newSession: Session = {
-      id: newSessionId,
-      title: `对话 ${sessions.length + 1}`,
-      selectedBlocks: newSelectedBlocks,
-      messages: [],
-      timestamp: Date.now(),
-      created_at: Date.now(),
-    };
+      if (res.ok) {
+        const data = await res.json();
+        if (data.session) {
+          const newSession: Session = {
+            id: String(data.session.id),
+            title: data.session.title,
+            selectedBlocks: newSelectedBlocks,
+            messages: [],
+            timestamp: data.session.timestamp,
+            created_at: data.session.created_at,
+          };
+          setSessions(prev => [...prev, newSession]);
+          setCurrentSessionId(String(data.session.id));
+          setMessages([]);
+          setSelectedBlocks(newSelectedBlocks);
+          refreshHighlights(newSelectedBlocks);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create session:', err);
+    }
 
-    setSessions(prev => [...prev, newSession]);
     setShowContextMenu(false);
   };
 
@@ -1160,7 +1184,7 @@ export default function ReaderPage() {
       const htmlFile = currentChapter.split('#')[0];
       const encodedHtmlFile = encodeURIComponent(htmlFile);
       try {
-        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
+        await fetch(`/api/comment/${bookId}/${encodedHtmlFile}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ comments: updatedComments }),
@@ -1187,7 +1211,7 @@ export default function ReaderPage() {
       const htmlFile = currentChapter.split('#')[0];
       const encodedHtmlFile = encodeURIComponent(htmlFile);
       try {
-        await fetch(`/api/note/${bookId}/${encodedHtmlFile}`, {
+        await fetch(`/api/comment/${bookId}/${encodedHtmlFile}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ comments: updatedComments }),
@@ -1487,7 +1511,7 @@ export default function ReaderPage() {
                       msg.id === messageId
                         ? {
                             ...msg,
-                            blocks: [{ ...msg.blocks[0], content: newContent }]
+                            content: newContent
                           }
                         : msg
                     ));

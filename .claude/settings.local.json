@@ -17,7 +17,8 @@
       "Bash(npm install adm-zip)",
       "Bash(cmd //c \"ren book books\")",
       "Bash(powershell -Command \"Rename-Item -Path ''book'' -NewName ''books''\")",
-      "Bash(powershell -Command \"Get-Process | Where-Object {$_Path -like ''*ai_reader*''} | Select-Object Id, ProcessName\")"
+      "Bash(powershell -Command \"Get-Process | Where-Object {$_Path -like ''*ai_reader*''} | Select-Object Id, ProcessName\")",
+      "Bash(npm install pg)"
     ]
   }
 }
