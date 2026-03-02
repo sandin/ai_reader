@@ -111,9 +111,27 @@ export async function DELETE(
 
   try {
     const { bookId } = await params;
-    const { searchParams } = new URL(request.url);
-    const sessionId = searchParams.get('sessionId');
-    const messageId = searchParams.get('messageId');
+
+    // Support both query params and JSON body for DELETE
+    let sessionId: string | null = null;
+    let messageId: string | null = null;
+
+    const contentType = request.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      try {
+        const body = await request.json();
+        sessionId = body.sessionId?.toString() || null;
+        messageId = body.messageId?.toString() || null;
+      } catch {
+        // Ignore parse errors, fall back to query params
+      }
+    }
+
+    if (!sessionId && !messageId) {
+      const { searchParams } = new URL(request.url);
+      sessionId = searchParams.get('sessionId');
+      messageId = searchParams.get('messageId');
+    }
 
     if (!bookId) {
       return NextResponse.json({ error: 'Missing required parameter: bookId' }, { status: 400 });
