@@ -502,7 +502,7 @@ export default function ChatPanel({
               <button
                 onClick={handleSubmit}
                 disabled={aiLoading || !input.trim()}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow ${
+                className={`w-8 h-8 p-0 flex items-center justify-center rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow ${
                   aiLoading
                     ? 'bg-slate-300 text-slate-500 cursor-wait'
                     : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed'
