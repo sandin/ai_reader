@@ -12,6 +12,7 @@ interface CommentPanelProps {
   onSave: () => void;
   onDelete: (commentId: string) => void;
   onEdit: (commentId: string, newContent: string) => void;
+  onJumpToCfi?: (cfiRange: string) => void;
   commentLoading?: boolean;
 }
 
@@ -23,6 +24,7 @@ export default function CommentPanel({
   onSave,
   onDelete,
   onEdit,
+  onJumpToCfi,
   commentLoading = false,
 }: CommentPanelProps) {
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -120,7 +122,11 @@ export default function CommentPanel({
               className="group bg-white border border-slate-200 rounded-lg p-3 hover:border-amber-300 transition-colors"
             >
               <div className="flex items-start justify-between gap-2 mb-2">
-                <p className="text-xs text-slate-500 line-clamp-2 flex-1">
+                <p
+                  className="text-xs text-slate-500 line-clamp-2 flex-1 cursor-pointer hover:text-amber-600 hover:underline"
+                  onClick={() => onJumpToCfi?.(comment.cfiRange)}
+                  title="点击跳转到原文"
+                >
                   "{comment.selectedText}"
                 </p>
               </div>

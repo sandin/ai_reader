@@ -1344,6 +1344,16 @@ export default function ReaderPage() {
     }
   };
 
+  // Jump to comment location in the book
+  const handleJumpToCfi = useCallback(async (cfiRange: string) => {
+    if (!rendition) return;
+    try {
+      await rendition.display(cfiRange);
+    } catch (err) {
+      console.error('Failed to jump to cfi:', err);
+    }
+  }, [rendition]);
+
   // Hide context menu on click outside
   useEffect(() => {
     const handleClickOutside = () => {
@@ -1671,6 +1681,7 @@ export default function ReaderPage() {
                   onSave={handleSaveComment}
                   onDelete={handleDeleteComment}
                   onEdit={handleEditComment}
+                  onJumpToCfi={handleJumpToCfi}
                   commentLoading={commentLoading}
                 />
               )}
