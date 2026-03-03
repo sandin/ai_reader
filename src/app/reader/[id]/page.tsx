@@ -1055,7 +1055,9 @@ export default function ReaderPage() {
     comments.forEach(comment => {
       if (comment.cfiRange && !commentRefs.current.has(comment.id)) {
         try {
-          rendition.annotations.underline(comment.cfiRange);
+          rendition.annotations.underline(comment.cfiRange, {}, undefined, 'comment-underline', {
+            "color": "red"
+          });
           commentRefs.current.set(comment.id, comment.cfiRange);
         } catch (e) { /* ignore */ }
       }
@@ -1271,7 +1273,7 @@ export default function ReaderPage() {
 
     if (rendition && commentCfiRange) {
       try {
-        rendition.annotations.underline(commentCfiRange);
+        rendition.annotations.underline(commentCfiRange, {}, undefined, 'comment-underline');
         commentRefs.current.set(newComment.id, commentCfiRange);
       } catch (e) { /* ignore */ }
     }
