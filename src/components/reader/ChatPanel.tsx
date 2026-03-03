@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import mermaid from 'mermaid';
 import { Panel, Group as PanelGroup, Separator } from 'react-resizable-panels';
 import { Block, Message, Session } from './types';
@@ -29,6 +30,10 @@ interface ChatPanelProps {
   onToggleAutoScroll?: (enabled: boolean) => void;
   // Mermaid setting
   mermaidEnabled?: boolean;
+  // Markdown breaks setting
+  markdownBreaksEnabled?: boolean;
+  // Remark GFM setting
+  remarkGfmEnabled?: boolean;
   // Callbacks
   onSendMessage: (input: string, isFirstMessage: boolean) => void;
   onSwitchSession: (sessionId: string) => void;
@@ -61,6 +66,8 @@ export default function ChatPanel({
   autoScrollOnStreaming,
   onToggleAutoScroll,
   mermaidEnabled = true,
+  markdownBreaksEnabled = true,
+  remarkGfmEnabled = true,
   onSendMessage,
   onSwitchSession,
   onCreateSession,
@@ -368,6 +375,8 @@ export default function ChatPanel({
                           fontFamily={fontFamily}
                           lineHeight={lineHeight}
                           mermaidEnabled={mermaidEnabled}
+                          markdownBreaksEnabled={markdownBreaksEnabled}
+                          remarkGfmEnabled={remarkGfmEnabled}
                         />
                       ) : (
                         <UserMessageContent
@@ -604,6 +613,8 @@ function MessageContent({
   fontFamily = 'Georgia, serif',
   lineHeight = 1.8,
   mermaidEnabled = true,
+  markdownBreaksEnabled = true,
+  remarkGfmEnabled = true,
 }: {
   content: string;
   isStreaming: boolean;
@@ -611,6 +622,8 @@ function MessageContent({
   fontFamily?: string;
   lineHeight?: number;
   mermaidEnabled?: boolean;
+  markdownBreaksEnabled?: boolean;
+  remarkGfmEnabled?: boolean;
 }) {
   if (isStreaming && !content) {
     return (
@@ -626,7 +639,12 @@ function MessageContent({
 
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={(() => {
+        const plugins = [];
+        if (remarkGfmEnabled) plugins.push(remarkGfm);
+        if (markdownBreaksEnabled) plugins.push(remarkBreaks);
+        return plugins;
+      })()}
       components={{
         p: ({ children }) => (
           <p className="mb-3" style={{ fontSize: `${fontSize}px`, fontFamily, lineHeight, color: '#3a3a3a' }}>

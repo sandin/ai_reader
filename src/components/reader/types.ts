@@ -66,6 +66,8 @@ export interface ToolbarSettings {
   showAutoScroll: boolean;
   showHighlight: boolean;
   showMermaid: boolean;
+  showMarkdownBreaks: boolean;
+  showRemarkGfm: boolean;
 }
 
 export const defaultToolbarSettings: ToolbarSettings = {
@@ -75,6 +77,8 @@ export const defaultToolbarSettings: ToolbarSettings = {
   showAutoScroll: true,
   showHighlight: true,
   showMermaid: true,
+  showMarkdownBreaks: true,
+  showRemarkGfm: true,
 };
 
 export const FONT_OPTIONS: FontOption[] = [

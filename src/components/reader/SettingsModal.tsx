@@ -17,15 +17,19 @@ interface SettingsModalProps {
   autoScrollOnStreaming: boolean;
   highlightEnabled: boolean;
   mermaidEnabled: boolean;
+  markdownBreaksEnabled: boolean;
+  remarkGfmEnabled: boolean;
   onToggleAutoScroll: () => void;
   onToggleHighlight: () => void;
   onToggleMermaid: () => void;
+  onToggleMarkdownBreaks: () => void;
+  onToggleRemarkGfm: () => void;
   // Toolbar visibility settings
   toolbarSettings: ToolbarSettings;
   onToolbarSettingsChange: (settings: ToolbarSettings) => void;
 }
 
-type SettingsCategory = 'reading' | 'display';
+type SettingsCategory = 'display' | 'markdown';
 
 interface Category {
   id: SettingsCategory;
@@ -35,20 +39,20 @@ interface Category {
 
 const categories: Category[] = [
   {
-    id: 'reading',
-    label: '阅读',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-      </svg>
-    ),
-  },
-  {
     id: 'display',
     label: '显示',
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'markdown',
+    label: 'Markdown',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
       </svg>
     ),
   },
@@ -95,13 +99,17 @@ export default function SettingsModal({
   autoScrollOnStreaming,
   highlightEnabled,
   mermaidEnabled,
+  markdownBreaksEnabled,
+  remarkGfmEnabled,
   onToggleAutoScroll,
   onToggleHighlight,
   onToggleMermaid,
+  onToggleMarkdownBreaks,
+  onToggleRemarkGfm,
   toolbarSettings,
   onToolbarSettingsChange,
 }: SettingsModalProps) {
-  const [activeCategory, setActiveCategory] = useState<SettingsCategory>('reading');
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>('display');
 
   // Load toolbar settings from localStorage on mount
   useEffect(() => {
@@ -133,7 +141,7 @@ export default function SettingsModal({
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
       <div
-        className="bg-white rounded-xl shadow-2xl w-[800px] h-[500px] flex overflow-hidden"
+        className="bg-white rounded-xl shadow-2xl w-[800px] h-[500px] flex overflow-hidden relative"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 左侧分类导航 */}
@@ -159,9 +167,10 @@ export default function SettingsModal({
 
         {/* 右侧设置内容 */}
         <div className="flex-1 p-6 overflow-y-auto">
-          {activeCategory === 'reading' && (
+          {activeCategory === 'display' && (
             <div className="space-y-6">
-              <h3 className="text-lg font-semibold text-slate-800 mb-4">阅读设置</h3>
+              <h3 className="text-lg font-semibold text-slate-800 mb-1">显示设置</h3>
+              <p className="text-xs text-slate-400 mb-4">勾选后在工具栏显示对应设置项</p>
 
               {/* 字体大小 */}
               <div className="flex items-center justify-between">
@@ -256,12 +265,6 @@ export default function SettingsModal({
                   </button>
                 </div>
               </div>
-            </div>
-          )}
-
-          {activeCategory === 'display' && (
-            <div className="space-y-6">
-              <h3 className="text-lg font-semibold text-slate-800 mb-4">显示设置</h3>
 
               {/* 自动滚动 */}
               <div className="flex items-center justify-between">
@@ -316,19 +319,18 @@ export default function SettingsModal({
                   />
                 </button>
               </div>
+            </div>
+          )}
+
+          {activeCategory === 'markdown' && (
+            <div className="space-y-6">
+              <h3 className="text-lg font-semibold text-slate-800 mb-4">Markdown 设置</h3>
 
               {/* Mermaid 图表 */}
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Checkbox
-                    checked={toolbarSettings.showMermaid}
-                    onChange={(v) => handleToolbarSettingChange('showMermaid', v)}
-                    title="在工具栏显示"
-                  />
-                  <div>
-                    <div className="text-sm text-slate-600">Mermaid 图表</div>
-                    <div className="text-xs text-slate-400 mt-0.5">渲染 Markdown 中的 Mermaid 图表</div>
-                  </div>
+                <div>
+                  <div className="text-sm text-slate-600">Mermaid 图表</div>
+                  <div className="text-xs text-slate-400 mt-0.5">渲染 Markdown 中的 Mermaid 图表</div>
                 </div>
                 <button
                   onClick={onToggleMermaid}
@@ -339,6 +341,46 @@ export default function SettingsModal({
                   <span
                     className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${
                       mermaidEnabled ? 'left-7' : 'left-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Markdown 换行 */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm text-slate-600">Markdown 换行</div>
+                  <div className="text-xs text-slate-400 mt-0.5">普通换行显示为换行</div>
+                </div>
+                <button
+                  onClick={onToggleMarkdownBreaks}
+                  className={`w-12 h-6 rounded-full transition-colors relative ${
+                    markdownBreaksEnabled ? 'bg-indigo-600' : 'bg-slate-200'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                      markdownBreaksEnabled ? 'left-7' : 'left-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* GFM 扩展 */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm text-slate-600">GFM 扩展</div>
+                  <div className="text-xs text-slate-400 mt-0.5">支持表格、删除线等 GitHub 风格 Markdown</div>
+                </div>
+                <button
+                  onClick={onToggleRemarkGfm}
+                  className={`w-12 h-6 rounded-full transition-colors relative ${
+                    remarkGfmEnabled ? 'bg-indigo-600' : 'bg-slate-200'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                      remarkGfmEnabled ? 'left-7' : 'left-1'
                     }`}
                   />
                 </button>

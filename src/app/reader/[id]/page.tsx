@@ -83,6 +83,8 @@ export default function ReaderPage() {
   const [autoScrollOnStreaming, setAutoScrollOnStreaming] = useState(false);
   const [highlightEnabled, setHighlightEnabled] = useState(true);
   const [mermaidEnabled, setMermaidEnabled] = useState(true);
+  const [markdownBreaksEnabled, setMarkdownBreaksEnabled] = useState(true);
+  const [remarkGfmEnabled, setRemarkGfmEnabled] = useState(true);
   const [isContentReady, setIsContentReady] = useState(false);
   const [bookTitle, setBookTitle] = useState<string>('');
   const [bookAuthor, setBookAuthor] = useState<string>('');
@@ -170,6 +172,22 @@ export default function ReaderPage() {
     } else {
       // Default to true if not set
       setMermaidEnabled(true);
+    }
+
+    const savedMarkdownBreaks = localStorage.getItem('reader-markdown-breaks');
+    if (savedMarkdownBreaks !== null) {
+      setMarkdownBreaksEnabled(savedMarkdownBreaks !== 'false');
+    } else {
+      // Default to true if not set
+      setMarkdownBreaksEnabled(true);
+    }
+
+    const savedRemarkGfm = localStorage.getItem('reader-remark-gfm');
+    if (savedRemarkGfm !== null) {
+      setRemarkGfmEnabled(savedRemarkGfm !== 'false');
+    } else {
+      // Default to true if not set
+      setRemarkGfmEnabled(true);
     }
 
     const savedHistory = localStorage.getItem('ai-chat-input-history');
@@ -1478,7 +1496,6 @@ export default function ReaderPage() {
         showToc={showToc}
         autoScrollOnStreaming={autoScrollOnStreaming}
         highlightEnabled={highlightEnabled}
-        mermaidEnabled={mermaidEnabled}
         onFontSizeChange={(size) => setFontSize(Math.min(32, Math.max(14, size)))}
         onFontFamilyChange={setFontFamily}
         onLineHeightChange={setLineHeight}
@@ -1492,11 +1509,6 @@ export default function ReaderPage() {
           const newValue = !highlightEnabled;
           setHighlightEnabled(newValue);
           localStorage.setItem('reader-highlight-enabled', String(newValue));
-        }}
-        onToggleMermaid={() => {
-          const newValue = !mermaidEnabled;
-          setMermaidEnabled(newValue);
-          localStorage.setItem('reader-mermaid-enabled', String(newValue));
         }}
         onOpenSettings={() => setShowSettings(true)}
         toolbarSettings={toolbarSettings}
@@ -1706,6 +1718,8 @@ export default function ReaderPage() {
                   lineHeight={lineHeight}
                   autoScrollOnStreaming={autoScrollOnStreaming}
                   mermaidEnabled={mermaidEnabled}
+                  markdownBreaksEnabled={markdownBreaksEnabled}
+                  remarkGfmEnabled={remarkGfmEnabled}
                   onToggleAutoScroll={(enabled) => {
                     setAutoScrollOnStreaming(enabled);
                     localStorage.setItem('ai-chat-auto-scroll', String(enabled));
@@ -1804,6 +1818,8 @@ export default function ReaderPage() {
         autoScrollOnStreaming={autoScrollOnStreaming}
         highlightEnabled={highlightEnabled}
         mermaidEnabled={mermaidEnabled}
+        markdownBreaksEnabled={markdownBreaksEnabled}
+        remarkGfmEnabled={remarkGfmEnabled}
         onToggleAutoScroll={() => {
           const newValue = !autoScrollOnStreaming;
           setAutoScrollOnStreaming(newValue);
@@ -1818,6 +1834,16 @@ export default function ReaderPage() {
           const newValue = !mermaidEnabled;
           setMermaidEnabled(newValue);
           localStorage.setItem('reader-mermaid-enabled', String(newValue));
+        }}
+        onToggleMarkdownBreaks={() => {
+          const newValue = !markdownBreaksEnabled;
+          setMarkdownBreaksEnabled(newValue);
+          localStorage.setItem('reader-markdown-breaks', String(newValue));
+        }}
+        onToggleRemarkGfm={() => {
+          const newValue = !remarkGfmEnabled;
+          setRemarkGfmEnabled(newValue);
+          localStorage.setItem('reader-remark-gfm', String(newValue));
         }}
         toolbarSettings={toolbarSettings}
         onToolbarSettingsChange={setToolbarSettings}
