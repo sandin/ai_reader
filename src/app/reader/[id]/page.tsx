@@ -88,6 +88,7 @@ export default function ReaderPage() {
   // Session state
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const currentSessionIdRef = useRef<string | null>(null);
 
   // Edit session modal state
   const [showEditSession, setShowEditSession] = useState(false);
@@ -579,8 +580,15 @@ export default function ReaderPage() {
 
   // ==================== Chat ====================
 
-  const handleSendMessage = async (input: string, isFirstMessage: boolean) => {
-    if (!input.trim() || aiLoading || !currentSessionId) return;
+  // Sync ref with state
+  useEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
+
+  const handleSendMessage = async (input: string, isFirstMessage: boolean, sessionId?: string, blocks?: Block[]) => {
+    const targetSessionId = sessionId || currentSessionIdRef.current;
+    const targetBlocks = blocks || selectedBlocks;
+    if (!input.trim() || aiLoading || !targetSessionId) return;
 
     // Save to history
     if (input.trim()) {
@@ -592,8 +600,8 @@ export default function ReaderPage() {
     // Prepare message - include selected text if first message
     let message = input;
     let selectedTextForApi = '';
-    if (isFirstMessage && selectedBlocks.length > 0) {
-      selectedTextForApi = selectedBlocks.map(b => b.content).join('\n\n');
+    if (isFirstMessage && targetBlocks.length > 0) {
+      selectedTextForApi = targetBlocks.map(b => b.content).join('\n\n');
     }
 
     // Optimistically add user message to UI
@@ -621,7 +629,7 @@ export default function ReaderPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sessionId: currentSessionId,
+          sessionId: targetSessionId,
           message: input,
           selectedText: selectedTextForApi || undefined,
         }),
@@ -1106,7 +1114,7 @@ export default function ReaderPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            sessionId: currentSessionId,
+            sessionId: currentSessionIdRef.current,
             selectedBlocks: newSelectedBlocks,
             messages,
           }),
@@ -1173,6 +1181,61 @@ export default function ReaderPage() {
       setCurrentCommentText('');
       setActiveTab('comment');
       setShowContextMenu(false);
+    }
+  };
+
+  const handleSummarize = async () => {
+    if (!contextMenuSelection || !rendition || !bookId || !currentChapter) return;
+    const blockId = Date.now().toString();
+    const newBlock: Block = {
+      id: blockId,
+      content: contextMenuSelection,
+      timestamp: Date.now(),
+      cfiRange: contextMenuCfiRange,
+    };
+
+    const newSelectedBlocks = [newBlock];
+
+    // Call API to create new session
+    const htmlFile = currentChapter.split('#')[0];
+    const encodedHtmlFile = encodeURIComponent(htmlFile);
+    try {
+      const res = await fetch(`/api/chat/${bookId}/${encodedHtmlFile}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create',
+          title: `对话 ${sessions.length + 1}`,
+          selectedBlocks: newSelectedBlocks,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.session) {
+          const newSession: Session = {
+            id: String(data.session.id),
+            title: data.session.title,
+            selectedBlocks: newSelectedBlocks,
+            messages: [],
+            timestamp: data.session.timestamp,
+            created_at: data.session.created_at,
+          };
+          setSessions(prev => [...prev, newSession]);
+          setCurrentSessionId(String(data.session.id));
+          // Note: currentSessionIdRef will be updated via useEffect
+          setMessages([]);
+          setSelectedBlocks(newSelectedBlocks);
+          refreshHighlights(newSelectedBlocks);
+
+          setShowContextMenu(false);
+
+          // Send summarize message with the new session ID and blocks
+          handleSendMessage('总结', true, String(data.session.id), newSelectedBlocks);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create session:', err);
     }
   };
 
@@ -1378,6 +1441,7 @@ export default function ReaderPage() {
                 onAddToAssistant={handleAddToAssistant}
                 onAddToAssistantNewChat={handleAddToAssistantNewChat}
                 onAddComment={handleAddComment}
+                onSummarize={handleSummarize}
                 onClose={() => setShowContextMenu(false)}
               />
 
