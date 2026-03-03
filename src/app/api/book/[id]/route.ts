@@ -43,6 +43,7 @@ export async function GET(
       id: book.id,
       filename: book.filename,
       title: book.title,
+      author: book.author,
       content: bookBase64,
     });
   } catch (error) {

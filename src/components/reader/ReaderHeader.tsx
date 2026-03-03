@@ -5,6 +5,7 @@ import { FONT_OPTIONS, ToolbarSettings, defaultToolbarSettings } from './types';
 
 interface ReaderHeaderProps {
   bookTitle: string;
+  bookAuthor?: string;
   fontSize: number;
   fontFamily: string;
   lineHeight: number;
@@ -25,6 +26,7 @@ interface ReaderHeaderProps {
 
 export default function ReaderHeader({
   bookTitle,
+  bookAuthor = '',
   fontSize,
   fontFamily,
   lineHeight,
@@ -76,6 +78,7 @@ export default function ReaderHeader({
         <div className="h-6 w-px bg-slate-200"></div>
         <h1 className="text-base font-semibold text-slate-800 truncate max-w-xs lg:max-w-md">
           {bookTitle}
+          {bookAuthor && <span className="text-sm font-normal text-slate-500 ml-2">— {bookAuthor}</span>}
         </h1>
       </div>
 

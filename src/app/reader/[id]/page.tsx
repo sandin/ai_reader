@@ -74,6 +74,7 @@ export default function ReaderPage() {
   const [mermaidEnabled, setMermaidEnabled] = useState(true);
   const [isContentReady, setIsContentReady] = useState(false);
   const [bookTitle, setBookTitle] = useState<string>('');
+  const [bookAuthor, setBookAuthor] = useState<string>('');
 
   // Chat state
   const [messages, setMessages] = useState<Message[]>([]);
@@ -211,6 +212,7 @@ export default function ReaderPage() {
 
         const data = await res.json();
         if (data.title) setBookTitle(data.title);
+        if (data.author) setBookAuthor(data.author);
 
         const bookData = Uint8Array.from(atob(data.content), c => c.charCodeAt(0));
         const bookBuffer = bookData.buffer.slice(
@@ -1406,6 +1408,7 @@ export default function ReaderPage() {
     <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 to-slate-100">
       <ReaderHeader
         bookTitle={bookTitle}
+        bookAuthor={bookAuthor}
         fontSize={fontSize}
         fontFamily={fontFamily}
         lineHeight={lineHeight}
