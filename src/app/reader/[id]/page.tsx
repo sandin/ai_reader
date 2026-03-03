@@ -950,7 +950,22 @@ export default function ReaderPage() {
         s.id === currentSessionId ? { ...s, messages: newMessages, timestamp: Date.now() } : s
       ));
     }
-  }, [messages, currentSessionId, selectedBlocks]);
+
+    // Save to database
+    try {
+      const htmlFile = currentChapter.split('#')[0];
+      const response = await fetch(`/api/chat/${bookId}/${encodeURIComponent(htmlFile)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId, content }),
+      });
+      if (!response.ok) {
+        console.error('Failed to save compressed message to database');
+      }
+    } catch (error) {
+      console.error('Error saving compressed message:', error);
+    }
+  }, [messages, currentSessionId, selectedBlocks, bookId, currentChapter]);
 
   const handleToggleExpandBlock = useCallback((id: string) => {
     setExpandedBlocks(prev => {
