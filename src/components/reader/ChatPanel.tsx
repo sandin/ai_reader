@@ -452,57 +452,74 @@ export default function ChatPanel({
       <Separator className="h-1 bg-slate-200 hover:bg-indigo-400 transition-colors cursor-row-resize" />
 
       {/* Input panel - default 120px, no max */}
-      <Panel id="input" defaultSize={10} minSize={80}>
-        <div className="h-full flex flex-col p-4 border-t border-slate-100 bg-slate-50">
-          <div className="flex gap-2 items-stretch flex-1 min-h-0">
-            <button
-              onClick={onCreateSession}
-              className="p-2.5 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition-colors shrink-0 self-end"
-              title="新建对话"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-            </button>
-            <textarea
-              value={input}
-              onChange={(e) => handleInputChange(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="输入问题..."
-              className="flex-1 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow resize-none overflow-y-auto"
-              disabled={aiLoading}
-              rows={1}
-            />
-            {/* Auto-complete suggestions */}
-            {showSuggestions && suggestions.length > 0 && (
-              <div className="absolute bottom-full left-0 right-14 mb-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto z-10">
-                {suggestions.map((suggestion, index) => (
-                  <div
-                    key={index}
-                    className={`px-3 py-2 text-sm cursor-pointer truncate ${
-                      index === selectedSuggestionIndex
-                        ? 'bg-indigo-50 text-indigo-600'
-                        : 'hover:bg-slate-50'
-                    }`}
-                    onClick={() => {
-                      setInput(suggestion);
-                      setShowSuggestions(false);
-                    }}
-                  >
-                    {suggestion}
-                  </div>
-                ))}
-              </div>
-            )}
-            <button
-              onClick={handleSubmit}
-              disabled={aiLoading || !input.trim()}
-              className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl text-sm font-medium hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow shrink-0 self-end"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-              </svg>
-            </button>
+      <Panel id="input" defaultSize={10} minSize={"140px"}>
+        <div className="h-full flex flex-col border-t border-slate-100 bg-slate-50">
+          {/* 输入框区域：带圆角边框，占据全部高度 */}
+          <div className="flex-1 flex flex-col border border-slate-200 rounded-xl m-2 overflow-hidden bg-white focus-within:border-indigo-600">
+            {/* Input 区域 */}
+            <div className="flex-1 relative">
+              <textarea
+                value={input}
+                onChange={(e) => handleInputChange(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="输入问题..."
+                className="w-full h-full px-4 py-3 text-sm focus:outline-none resize-none overflow-y-auto"
+                disabled={aiLoading}
+              />
+              {/* Auto-complete suggestions */}
+              {showSuggestions && suggestions.length > 0 && (
+                <div className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto z-10">
+                  {suggestions.map((suggestion, index) => (
+                    <div
+                      key={index}
+                      className={`px-3 py-2 text-sm cursor-pointer truncate ${
+                        index === selectedSuggestionIndex
+                          ? 'bg-indigo-50 text-indigo-600'
+                          : 'hover:bg-slate-50'
+                      }`}
+                      onClick={() => {
+                        setInput(suggestion);
+                        setShowSuggestions(false);
+                      }}
+                    >
+                      {suggestion}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* Buttons 区域：左右对齐 */}
+            <div className="flex items-center justify-between px-2 py-1.5 border-t border-slate-100">
+              <button
+                onClick={onCreateSession}
+                className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-indigo-600 transition-colors"
+                title="新建对话"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={aiLoading || !input.trim()}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow ${
+                  aiLoading
+                    ? 'bg-slate-300 text-slate-500 cursor-wait'
+                    : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed'
+                }`}
+              >
+                {aiLoading ? (
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </Panel>
