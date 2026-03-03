@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import mermaid from 'mermaid';
 import { Panel, Group as PanelGroup, Separator } from 'react-resizable-panels';
 import { Block, Message, Session } from './types';
+import { formatRelativeTime } from '@/lib/utils';
 
 interface ChatPanelProps {
   sessions: Session[];
@@ -353,9 +354,10 @@ export default function ChatPanel({
               <div className="space-y-4">
                 {messages.map((msg, index) => (
                   <div key={msg.id} className="group">
-                    {/* Role indicator */}
-                    <div className="text-xs text-slate-400 mb-1">
-                      {msg.role === 'user' ? '你' : 'AI'}
+                    {/* Role and time indicator */}
+                    <div className="text-xs text-slate-400 mb-1 flex justify-between">
+                      <span>{msg.role === 'user' ? '你' : 'AI'}</span>
+                      <span>{formatRelativeTime(msg.timestamp)}</span>
                     </div>
                     <div className="text-[#3a3a3a] px-2">
                       {msg.role === 'assistant' ? (

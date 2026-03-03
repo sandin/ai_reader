@@ -1322,6 +1322,28 @@ export default function ReaderPage() {
     }
   };
 
+  const handleEditComment = async (commentId: string, newContent: string) => {
+    const comment = comments.find(c => c.id === commentId);
+    if (!comment) return;
+
+    const updatedComments = comments.map(c =>
+      c.id === commentId ? { ...c, content: newContent, timestamp: Date.now() } : c
+    );
+    setComments(updatedComments);
+
+    if (currentChapter && bookId) {
+      const htmlFile = currentChapter.split('#')[0];
+      const encodedHtmlFile = encodeURIComponent(htmlFile);
+      try {
+        await fetch(`/api/comment/${bookId}/${encodedHtmlFile}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ comments: updatedComments }),
+        });
+      } catch (err) { /* ignore */ }
+    }
+  };
+
   // Hide context menu on click outside
   useEffect(() => {
     const handleClickOutside = () => {
@@ -1648,6 +1670,7 @@ export default function ReaderPage() {
                   onInputChange={setCurrentCommentText}
                   onSave={handleSaveComment}
                   onDelete={handleDeleteComment}
+                  onEdit={handleEditComment}
                   commentLoading={commentLoading}
                 />
               )}
