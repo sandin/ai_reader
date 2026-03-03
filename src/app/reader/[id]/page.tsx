@@ -81,6 +81,8 @@ export default function ReaderPage() {
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
   const [isSelectedBlocksExpanded, setIsSelectedBlocksExpanded] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [commentLoading, setCommentLoading] = useState(false);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
 
   // Session state
@@ -955,6 +957,7 @@ export default function ReaderPage() {
 
   const loadChatForChapter = useCallback(async (href: string) => {
     if (!href || !bookId) return;
+    setChatLoading(true);
     try {
       const htmlFile = href.split('#')[0];
       const encodedHtmlFile = encodeURIComponent(htmlFile);
@@ -985,10 +988,13 @@ export default function ReaderPage() {
     } catch (err) {
       console.error('Failed to load notes:', err);
       setSelectedBlocks([]);
+    } finally {
+      setChatLoading(false);
     }
   }, [bookId]);
 
   const loadCommentsForChapter = useCallback(async (href: string) => {
+    setCommentLoading(true);
     try {
       const htmlFile = href.split('#')[0];
       const encodedHtmlFile = encodeURIComponent(htmlFile);
@@ -1007,6 +1013,8 @@ export default function ReaderPage() {
     } catch (err) {
       console.error('Failed to load comments:', err);
       setComments([]);
+    } finally {
+      setCommentLoading(false);
     }
   }, [bookId]);
 
@@ -1488,6 +1496,7 @@ export default function ReaderPage() {
                   expandedBlocks={expandedBlocks}
                   isSelectedBlocksExpanded={isSelectedBlocksExpanded}
                   aiLoading={aiLoading}
+                  chatLoading={chatLoading}
                   inputHistory={inputHistory}
                   inputLayout={chatInputLayout || undefined}
                   fontSize={fontSize}
@@ -1558,6 +1567,7 @@ export default function ReaderPage() {
                   onInputChange={setCurrentCommentText}
                   onSave={handleSaveComment}
                   onDelete={handleDeleteComment}
+                  commentLoading={commentLoading}
                 />
               )}
             </Panel>
