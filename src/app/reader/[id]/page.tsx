@@ -37,6 +37,17 @@ export default function ReaderPage() {
   const [currentChapter, setCurrentChapter] = useState<string>('');
   const [chapterIndex, setChapterIndex] = useState<ChapterIndex>({ tree: [], htmlOrder: [] });
 
+  // Location history state
+  const [locationHistory, setLocationHistory] = useState<{ href: string; cfi: string }[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const historyIndexRef = useRef(-1);
+  const isNavigatingHistoryRef = useRef(false);
+
+  // Sync ref with state
+  useEffect(() => {
+    historyIndexRef.current = historyIndex;
+  }, [historyIndex]);
+
   // Loading and error state
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
@@ -406,12 +417,31 @@ export default function ReaderPage() {
       setCurrentChapter(href);
       const cfi = location.start.cfi;
 
-      // Skip saving on initial location to avoid duplicate API calls
+         // Skip saving on initial location to avoid duplicate API calls
       if (isInitialLocationRef.current) {
         isInitialLocationRef.current = false;
         return;
       }
 
+      // Save to location history (only if not navigating from history buttons)
+      // Only add to history if href changed
+      const lastLocation = locationHistory[historyIndexRef.current];
+      if (!isNavigatingHistoryRef.current && (!lastLocation || lastLocation.href !== href)) {
+        console.log("[relocated]", href, !isNavigatingHistoryRef.current);
+        setLocationHistory(prev => {
+          // When adding new location, clear any forward history
+          const newHistory = [...prev.slice(0, historyIndexRef.current + 1), { href, cfi }];
+          const trimmedHistory = newHistory.slice(-100); // Keep max 100 items
+          console.log("[relocated] trimmedHistory count:", trimmedHistory.length, "array:", trimmedHistory);
+          // Update history index to point to the last item
+          const newIndex = trimmedHistory.length - 1;
+          setHistoryIndex(newIndex);
+          historyIndexRef.current = newIndex;
+          return trimmedHistory;
+        });
+      }
+
+   
       if (saveProgressTimeoutRef.current) clearTimeout(saveProgressTimeoutRef.current);
       saveProgressTimeoutRef.current = setTimeout(() => {
         const htmlFile = href.split('#')[0];
@@ -579,6 +609,39 @@ export default function ReaderPage() {
       await rendition.display(newHref);
     }
   }, [currentPage, totalPages, chapterIndex.htmlOrder, rendition, saveProgress]);
+
+  // Navigate through location history
+  const handleGoBack = useCallback(async () => {
+    console.log("[handleGoBack] historyIndexRef.current:", historyIndexRef.current, "locationHistory:", locationHistory.length);
+    if (historyIndexRef.current > 0 && rendition) {
+      console.log("[handleGoBack] going back to index:", historyIndexRef.current - 1);
+      isNavigatingHistoryRef.current = true;
+      const newIndex = historyIndexRef.current - 1;
+      const location = locationHistory[newIndex];
+      console.log("[handleGoBack] location:", location);
+      setHistoryIndex(newIndex);
+      historyIndexRef.current = newIndex;
+      setCurrentChapter(location.href);
+      await rendition.display(location.cfi);
+      setTimeout(() => { isNavigatingHistoryRef.current = false; }, 100);
+    }
+  }, [historyIndex, locationHistory, rendition]);
+
+  const handleGoForward = useCallback(async () => {
+    console.log("[handleGoForward] historyIndexRef.current:", historyIndexRef.current, "locationHistory:", locationHistory.length);
+    if (historyIndexRef.current < locationHistory.length - 1 && rendition) {
+      console.log("[handleGoForward] going forward to index:", historyIndexRef.current + 1);
+      isNavigatingHistoryRef.current = true;
+      const newIndex = historyIndexRef.current + 1;
+      const location = locationHistory[newIndex];
+      console.log("[handleGoForward] location:", location);
+      setHistoryIndex(newIndex);
+      historyIndexRef.current = newIndex;
+      setCurrentChapter(location.href);
+      await rendition.display(location.cfi);
+      setTimeout(() => { isNavigatingHistoryRef.current = false; }, 100);
+    }
+  }, [historyIndex, locationHistory, rendition]);
 
   // ==================== Chat ====================
 
@@ -1515,6 +1578,29 @@ export default function ReaderPage() {
                   </div>
                   {currentChapter && totalPages > 0 && (
                     <div className="flex items-center gap-2">
+                      {/* History navigation buttons */}
+                      <div className="flex items-center gap-1 mr-1">
+                        <button
+                          onClick={handleGoBack}
+                          disabled={historyIndex <= 0}
+                          className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                          title="后退"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 12H5 M9 7l-5 5 5 5" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={handleGoForward}
+                          disabled={historyIndex >= locationHistory.length - 1}
+                          className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                          title="前进"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14 M15 7l5 5-5 5" />
+                          </svg>
+                        </button>
+                      </div>
                       <button
                         onClick={handlePrevPage}
                         disabled={currentPage <= 1}
