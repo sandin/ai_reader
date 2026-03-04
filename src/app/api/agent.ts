@@ -118,18 +118,20 @@ interface AIModelConfig {
   maxTokens: number;
   baseURL: string;
   appKey: string;
-  temperature?: {
-    default?: number;
-    summarize?: number;
-    translate?: number;
-    title?: number;
-    compress?: number;
-  };
 }
 
-// 获取模型配置中的 temperature
-function getTemperature(modelConfig: AIModelConfig, taskType: 'default' | 'summarize' | 'translate' | 'title' | 'compress'): number {
-  return modelConfig.temperature?.[taskType] ?? modelConfig.temperature?.default ?? 0.7;
+// 获取任务对应的 temperature，使用 INTENT_TEMPERATURES 配置
+function getTemperature(taskType: 'default' | 'summarize' | 'translate' | 'title' | 'compress'): number {
+  // title 和 compress 使用默认的 0.7
+  if (taskType === 'title' || taskType === 'compress') {
+    return 0.7;
+  }
+  // default 使用 1.3 (通用的对话温度)
+  if (taskType === 'default') {
+    return INTENT_TEMPERATURES.other;
+  }
+  // summarize, translate 使用 INTENT_TEMPERATURES
+  return INTENT_TEMPERATURES[taskType] ?? 0.7;
 }
 
 interface AIProvider {
@@ -161,14 +163,19 @@ function loadModelsConfig(): ModelsConfig {
 
 /**
  * 根据 model id (Provider/ModelName 格式) 获取模型配置
+ * 支持两种格式：
+ * 1. "Provider/ModelName" (如 "deepseek/deepseek-chat")
+ * 2. "Provider/SubProvider/ModelName" (如 "ZenMux/openai/gpt-5.2-pro")
+ * 第一个 / 前面是 providerName，后面都是 modelName
  */
 export function getModelConfigById(modelId: string): AIModelConfig | null {
-  // 解析 model id: "Provider/ModelName"
-  const parts = modelId.split('/');
-  if (parts.length !== 2) {
+  // 解析 model id: 第一个 / 前面是 providerName，后面都是 modelName
+  const slashIndex = modelId.indexOf('/');
+  if (slashIndex === -1) {
     return null;
   }
-  const [providerName, modelName] = parts;
+  const providerName = modelId.substring(0, slashIndex);
+  const modelName = modelId.substring(slashIndex + 1);
 
   const config = loadModelsConfig();
   for (const provider of config.providers) {
@@ -438,7 +445,7 @@ export async function* streamCompress(modelId: string, content: string, highligh
     message: prompt,
     apiKey,
     modelName: modelId,
-    temperature: getTemperature(modelConfig, 'compress'),
+    temperature: getTemperature('compress'),
     maxTokens: modelConfig.maxTokens || undefined,
   })) {
     yield chunk;
@@ -463,7 +470,7 @@ export async function generateTitle(modelId: string, conversationHistory: string
   }
 
   // 创建聊天模型，使用模型配置中的 temperature
-  const chat = createChatModel(apiKey, modelId, getTemperature(modelConfig, 'title'), 100);
+  const chat = createChatModel(apiKey, modelId, getTemperature('title'), 100);
 
   // 调用 LLM
   const response = await chat.invoke([
