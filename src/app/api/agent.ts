@@ -72,6 +72,21 @@ How can I help you?
   other: `你是一个阅读助手，专门帮助用户理解和分析电子书中的内容，回答用户的问题。`,
 };
 
+// 意图对应的 temperature 值
+// ref: https://api-docs.deepseek.com/zh-cn/quick_start/parameter_settings
+// temperature 参数默认为 1.0。
+// 场景	温度
+// 代码生成/数学解题   	0.0
+// 数据抽取/分析	1.0
+// 通用对话	1.3
+// 翻译	1.3
+// 创意类写作/诗歌创作	1.5
+export const INTENT_TEMPERATURES: Record<Intent, number> = {
+  summarize: 1.0,
+  translate: 1.3,
+  other: 1.3,
+};
+
 /**
  * 创建 LangChain tracer 用于 LangSmith 追踪
  */

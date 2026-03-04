@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { streamChat, parseUserMessage, classifyIntent, INTENT_PROMPTS, Intent } from '../agent';
+import { streamChat, parseUserMessage, classifyIntent, INTENT_PROMPTS, INTENT_TEMPERATURES, Intent } from '../agent';
 import { query } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 
@@ -91,8 +91,9 @@ export async function POST(req: NextRequest) {
     // 分类用户意图
     const intent: Intent = await classifyIntent(message, apiKey, modelName);
 
-    // 根据意图选择 system prompt
+    // 根据意图选择 system prompt 和 temperature
     const systemPrompt = INTENT_PROMPTS[intent];
+    const temperature = INTENT_TEMPERATURES[intent];
 
     // 使用流式响应
     const encoder = new TextEncoder();
@@ -107,6 +108,7 @@ export async function POST(req: NextRequest) {
             history,
             apiKey,
             modelName,
+            temperature,
             systemPrompt,
           })) {
             if (chunk.content) {
