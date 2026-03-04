@@ -353,15 +353,12 @@ export default function ReaderPage() {
   // Load saved reading progress
   const loadSavedProgress = async (chapterList: Chapter[], tree: any[] = []) => {
     try {
-      console.log('[Reader] Loading progress for bookId:', bookId);
       const progressRes = await fetch(`/api/progress?bookId=${bookId}`);
       if (progressRes.ok) {
         const progressData = await progressRes.json();
-        console.log('[Reader] Progress data:', progressData);
 
         // Always try to set CFI if available, regardless of chapter existence
         if (progressData.cfi) {
-          console.log('[Reader] Setting savedCfi:', progressData.cfi);
           savedCfiRef.current = progressData.cfi;
           setSavedCfi(progressData.cfi);
         }
@@ -370,8 +367,6 @@ export default function ReaderPage() {
           const savedChapterExists = chapterList.some(
             (c: Chapter) => c.href.includes(progressData.htmlFile) || progressData.htmlFile.includes(c.href.split('#')[0].split('/').pop() || '')
           );
-          console.log('[Reader] Saved chapter exists:', savedChapterExists, 'htmlFile:', progressData.htmlFile);
-          console.log('[Reader] Chapter list sample:', chapterList.slice(0, 3).map(c => c.href));
           if (savedChapterExists) {
             const htmlFileName = progressData.htmlFile.split('/').pop() || progressData.htmlFile;
             const findInTree = (nodes: any[]): any => {
@@ -386,24 +381,19 @@ export default function ReaderPage() {
             };
             const searchTree = tree.length > 0 ? tree : chapterIndex.tree;
             const indexInfo = findInTree(searchTree);
-            console.log('[Reader] Index info:', indexInfo);
             if (indexInfo) {
               // 使用保存的 htmlFile，而不是第一个
               setCurrentChapter(progressData.htmlFile);
-              console.log('[Reader] Set currentChapter to:', progressData.htmlFile);
             } else {
               const matched = chapterList.find((c: Chapter) => c.href.split('#')[0].split('/').pop() === htmlFileName);
               if (matched) {
                 setCurrentChapter(matched.href);
-                console.log('[Reader] Set currentChapter to (fallback):', matched.href);
               }
             }
           } else if (chapterList.length > 0) {
             // Chapter not found in TOC, but we have CFI - try to use first chapter anyway
             // The CFI will be used to restore position within that chapter
-            console.log('[Reader] Chapter not in TOC, will try to use first chapter with CFI');
             setCurrentChapter(chapterList[0].href);
-            console.log('[Reader] Set currentChapter to first chapter:', chapterList[0].href);
           }
         }
       }
@@ -448,12 +438,10 @@ export default function ReaderPage() {
       // Only add to history if href changed
       const lastLocation = locationHistory[historyIndexRef.current];
       if (!isNavigatingHistoryRef.current && (!lastLocation || lastLocation.href !== href)) {
-        console.log("[relocated]", href, !isNavigatingHistoryRef.current);
         setLocationHistory(prev => {
           // When adding new location, clear any forward history
           const newHistory = [...prev.slice(0, historyIndexRef.current + 1), { href, cfi }];
           const trimmedHistory = newHistory.slice(-100); // Keep max 100 items
-          console.log("[relocated] trimmedHistory count:", trimmedHistory.length, "array:", trimmedHistory);
           // Update history index to point to the last item
           const newIndex = trimmedHistory.length - 1;
           setHistoryIndex(newIndex);
@@ -517,10 +505,8 @@ export default function ReaderPage() {
     if (initialChapter) {
       const cfiToRestore = savedCfiRef.current;
       if (cfiToRestore) {
-        console.log('[Reader] Attempting to restore CFI:', cfiToRestore);
         try {
           await renditionInstance.display(cfiToRestore);
-          console.log('[Reader] Successfully restored CFI');
           savedCfiRef.current = null;
           setSavedCfi(null);
         } catch (cfiError) {
@@ -559,9 +545,7 @@ export default function ReaderPage() {
   // Restore saved position when savedCfi is available and rendition is ready
   useEffect(() => {
     if (rendition && savedCfi) {
-      console.log('[Reader] useEffect: Attempting to restore CFI:', savedCfi);
       rendition.display(savedCfi).then(() => {
-        console.log('[Reader] useEffect: Successfully restored CFI');
         setSavedCfi(null);
       }).catch((err) => {
         console.warn('[Reader] useEffect: Failed to restore CFI:', err);
@@ -1317,9 +1301,11 @@ export default function ReaderPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            content: '⭐',
-            selectedText: contextMenuSelection,
-            cfiRange: contextMenuCfiRange,
+            comments: [{
+              content: '⭐',
+              selectedText: contextMenuSelection,
+              cfiRange: contextMenuCfiRange,
+            }],
           }),
         });
       } catch (err) {

@@ -20,18 +20,13 @@ export default function TableOfContents({
 
   // Auto-expand parents when currentChapter changes
   useEffect(() => {
-    console.log('[TOC] Auto-expand effect triggered', { currentChapter, treeLength: tree.length });
-
     if (!currentChapter || tree.length === 0) {
-      console.log('[TOC] Early return: missing currentChapter or tree');
       return;
     }
 
     const currentFile = currentChapter.split('#')[0].split('/').pop() || '';
-    console.log('[TOC] Current file:', currentFile);
 
     if (!currentFile) {
-      console.log('[TOC] Early return: no currentFile');
       return;
     }
 
@@ -41,21 +36,10 @@ export default function TableOfContents({
       for (const node of nodes) {
         const nodeFile = node.href?.split('#')[0].split('/').pop() || '';
         const contentsFiles = node.contents.map(c => c.split('#')[0].split('/').pop());
-
-        console.log('[TOC] Checking node:', {
-          chapterName: node.chapter_name,
-          nodeFile,
-          contentsFiles,
-          targetFile,
-          isNodeMatch: nodeFile === targetFile,
-          isContentsMatch: node.contents.some(c => c.split('#')[0].split('/').pop() === targetFile)
-        });
-
         const isMatch = nodeFile === targetFile ||
           node.contents.some(c => c.split('#')[0].split('/').pop() === targetFile);
 
         if (isMatch) {
-          console.log('[TOC] Found match! Path to expand:', path);
           // 展开当前节点本身
           parentsToExpand.add(node.chapter_id);
           // 展开所有祖先节点
@@ -74,8 +58,6 @@ export default function TableOfContents({
 
     traverse(tree, currentFile, []);
 
-    console.log('[TOC] Parents to expand:', Array.from(parentsToExpand));
-
     if (parentsToExpand.size > 0) {
       setExpandedNodes(prev => {
         const newSet = new Set(prev);
@@ -86,7 +68,6 @@ export default function TableOfContents({
             changed = true;
           }
         });
-        console.log('[TOC] Expanded nodes changed:', changed, 'new set:', Array.from(newSet));
         return changed ? newSet : prev;
       });
     }
