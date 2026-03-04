@@ -133,6 +133,9 @@ export default function ReaderPage() {
   const [commentSelection, setCommentSelection] = useState('');
   const [commentCfiRange, setCommentCfiRange] = useState('');
 
+  // 过滤掉仅有 emoji 的评论（用于高亮显示的占位评论）
+  const visibleComments = comments.filter(c => c.content.trim() !== '⭐');
+
   // Comment annotation refs
   const commentRefs = useRef<Map<string, string>>(new Map());
 
@@ -1285,6 +1288,48 @@ export default function ReaderPage() {
     }
   };
 
+  const handleAddHighlight = async () => {
+    if (!contextMenuSelection || !contextMenuCfiRange) return;
+
+    const newComment: Comment = {
+      id: Date.now().toString(),
+      content: '⭐',
+      selectedText: contextMenuSelection,
+      cfiRange: contextMenuCfiRange,
+      chapter: currentChapter,
+      timestamp: Date.now(),
+    };
+
+    const updatedComments = [...comments, newComment];
+    setComments(updatedComments);
+
+    if (rendition && contextMenuCfiRange) {
+      try {
+        rendition.annotations.highlight(contextMenuCfiRange, {}, undefined, 'comment-highlight');
+        commentRefs.current.set(newComment.id, contextMenuCfiRange);
+      } catch (e) { /* ignore */ }
+    }
+
+    // 保存到数据库
+    if (bookId && currentChapter) {
+      try {
+        await fetch('/api/comment/' + bookId + '/' + encodeURIComponent(currentChapter), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: '⭐',
+            selectedText: contextMenuSelection,
+            cfiRange: contextMenuCfiRange,
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to save highlight:', err);
+      }
+    }
+
+    setShowContextMenu(false);
+  };
+
   const handleSummarize = async () => {
     if (!contextMenuSelection || !rendition || !bookId || !currentChapter) return;
     const blockId = Date.now().toString();
@@ -1587,6 +1632,7 @@ export default function ReaderPage() {
                 onAddToAssistant={handleAddToAssistant}
                 onAddToAssistantNewChat={handleAddToAssistantNewChat}
                 onAddComment={handleAddComment}
+                onAddHighlight={handleAddHighlight}
                 onSummarize={handleSummarize}
                 onClose={() => setShowContextMenu(false)}
               />
@@ -1715,7 +1761,7 @@ export default function ReaderPage() {
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
                   </svg>
-                  评论 ({comments.length})
+                  评论 ({visibleComments.length})
                 </button>
               </div>
 
@@ -1797,7 +1843,7 @@ export default function ReaderPage() {
               {/* Comment Panel */}
               {activeTab === 'comment' && (
                 <CommentPanel
-                  comments={comments}
+                  comments={visibleComments}
                   selectedText={commentSelection}
                   inputText={currentCommentText}
                   onInputChange={setCurrentCommentText}

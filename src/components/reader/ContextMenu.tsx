@@ -1,5 +1,7 @@
 'use client';
 
+import { useMemo } from 'react';
+
 interface ContextMenuProps {
   visible: boolean;
   position: { x: number; y: number };
@@ -8,6 +10,7 @@ interface ContextMenuProps {
   onAddToAssistant: () => void;
   onAddToAssistantNewChat: () => void;
   onAddComment: () => void;
+  onAddHighlight: () => void;
   onSummarize: () => void;
   onClose: () => void;
 }
@@ -20,17 +23,39 @@ export default function ContextMenu({
   onAddToAssistant,
   onAddToAssistantNewChat,
   onAddComment,
+  onAddHighlight,
   onSummarize,
   onClose,
 }: ContextMenuProps) {
   if (!visible || !selection) return null;
 
+  // 菜单位置计算，确保不超出视口
+  const menuPosition = useMemo(() => {
+    const menuWidth = 180; // min-w-[160px] + padding
+    const menuHeight = 400; // 约8个菜单项的高度
+
+    let x = position.x;
+    let y = position.y;
+
+    // 检查右侧是否超出视口
+    if (x + menuWidth > window.innerWidth) {
+      x = window.innerWidth - menuWidth - 10;
+    }
+
+    // 检查下方是否超出视口
+    if (y + menuHeight > window.innerHeight) {
+      y = window.innerHeight - menuHeight - 10;
+    }
+
+    return { x, y };
+  }, [position.x, position.y]);
+
   return (
     <div
       className="fixed z-50 bg-white rounded-lg shadow-lg border border-slate-200 py-1 min-w-[160px]"
       style={{
-        left: position.x,
-        top: position.y,
+        left: menuPosition.x,
+        top: menuPosition.y,
       }}
     >
       {/* common group */}
@@ -97,6 +122,15 @@ export default function ContextMenu({
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
         </svg>
         <span>添加评论</span>
+      </button>
+      <button
+        onClick={onAddHighlight}
+        className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 transition-colors"
+      >
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+        </svg>
+        <span>划重点</span>
       </button>
     </div>
   );
