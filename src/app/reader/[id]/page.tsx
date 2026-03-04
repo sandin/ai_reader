@@ -22,6 +22,7 @@ import {
   LoadingState,
   ErrorState,
   defaultToolbarSettings,
+  AIModelInfo,
 } from '@/components/reader';
 
 export default function ReaderPage() {
@@ -112,6 +113,26 @@ export default function ReaderPage() {
   // Settings modal state
   const [showSettings, setShowSettings] = useState(false);
   const [toolbarSettings, setToolbarSettings] = useState(defaultToolbarSettings);
+
+  // AI model state - load from localStorage or use defaults
+  const [aiModels, setAiModels] = useState<AIModelInfo[]>([]);
+  const [fastModel, setFastModel] = useState('');
+  const [baseModel, setBaseModel] = useState('');
+
+  // Load AI models config from API
+  useEffect(() => {
+    fetch('/api/models')
+      .then(res => res.json())
+      .then((config: { models: AIModelInfo[] }) => {
+        setAiModels(config.models);
+        // Load saved models from localStorage (can be empty)
+        const savedFastModel = localStorage.getItem('ai-fast-model');
+        const savedBaseModel = localStorage.getItem('ai-base-model');
+        if (savedFastModel) setFastModel(savedFastModel);
+        if (savedBaseModel) setBaseModel(savedBaseModel);
+      })
+      .catch(err => console.error('Failed to load models config:', err));
+  }, []);
 
   // Compress modal state
   const [showCompress, setShowCompress] = useState(false);
@@ -694,6 +715,10 @@ export default function ReaderPage() {
     setAiLoading(true);
 
     try {
+      // Fallback to first model if not selected
+      const effectiveFastModel = fastModel || aiModels[0]?.id || '';
+      const effectiveBaseModel = baseModel || aiModels[0]?.id || '';
+
       // Send to server - server will save message and return streaming response
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -702,6 +727,8 @@ export default function ReaderPage() {
           sessionId: targetSessionId,
           message: input,
           selectedText: selectedTextForApi || undefined,
+          baseModelId: effectiveBaseModel,
+          fastModelId: effectiveFastModel,
         }),
       });
 
@@ -1562,6 +1589,12 @@ export default function ReaderPage() {
         }}
         onOpenSettings={() => setShowSettings(true)}
         toolbarSettings={toolbarSettings}
+        aiModels={aiModels}
+        baseModel={baseModel}
+        onBaseModelChange={(model) => {
+          setBaseModel(model);
+          localStorage.setItem('ai-base-model', model);
+        }}
       />
 
       <PanelGroup
@@ -1853,6 +1886,7 @@ export default function ReaderPage() {
         bookId={bookId}
         currentChapter={currentChapter}
         sessionId={editingSessionId || undefined}
+        fastModelId={fastModel || aiModels[0]?.id || ''}
         onTitleChange={setEditingSessionTitle}
         onSave={handleSaveSessionTitle}
         onClose={() => setShowEditSession(false)}
@@ -1900,6 +1934,17 @@ export default function ReaderPage() {
         }}
         toolbarSettings={toolbarSettings}
         onToolbarSettingsChange={setToolbarSettings}
+        aiModels={aiModels}
+        fastModel={fastModel}
+        baseModel={baseModel}
+        onFastModelChange={(model) => {
+          setFastModel(model);
+          localStorage.setItem('ai-fast-model', model);
+        }}
+        onBaseModelChange={(model) => {
+          setBaseModel(model);
+          localStorage.setItem('ai-base-model', model);
+        }}
       />
 
       {/* Compress Modal */}
@@ -1908,6 +1953,7 @@ export default function ReaderPage() {
         onClose={() => setShowCompress(false)}
         content={compressContent}
         messageId={compressMessageId}
+        modelId={fastModel || aiModels[0]?.id || ''}
         onSubmit={handleCompressSubmit}
       />
     </div>

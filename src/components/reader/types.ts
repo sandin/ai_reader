@@ -58,6 +58,12 @@ export interface FontOption {
   label: string;
 }
 
+// AI Model configuration (from API)
+export interface AIModelInfo {
+  id: string;
+  name: string;
+}
+
 // Toolbar visibility settings
 export interface ToolbarSettings {
   showFontSize: boolean;
@@ -68,6 +74,7 @@ export interface ToolbarSettings {
   showMermaid: boolean;
   showMarkdownBreaks: boolean;
   showRemarkGfm: boolean;
+  showBaseModel: boolean;
 }
 
 export const defaultToolbarSettings: ToolbarSettings = {
@@ -79,6 +86,7 @@ export const defaultToolbarSettings: ToolbarSettings = {
   showMermaid: true,
   showMarkdownBreaks: true,
   showRemarkGfm: true,
+  showBaseModel: true,
 };
 
 export const FONT_OPTIONS: FontOption[] = [

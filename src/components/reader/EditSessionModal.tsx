@@ -8,6 +8,7 @@ interface EditSessionModalProps {
   bookId?: string;
   currentChapter?: string;
   sessionId?: string;
+  fastModelId?: string;
   onTitleChange: (title: string) => void;
   onSave: () => void;
   onClose: () => void;
@@ -19,6 +20,7 @@ export default function EditSessionModal({
   bookId,
   currentChapter,
   sessionId,
+  fastModelId,
   onTitleChange,
   onSave,
   onClose,
@@ -39,6 +41,7 @@ export default function EditSessionModal({
           bookId,
           htmlFile: currentChapter,
           sessionId,
+          fastModelId,
         }),
       });
 

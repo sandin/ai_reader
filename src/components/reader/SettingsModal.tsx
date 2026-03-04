@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { FONT_OPTIONS, ToolbarSettings, defaultToolbarSettings } from './types';
+import { FONT_OPTIONS, ToolbarSettings, defaultToolbarSettings, AIModelInfo } from './types';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -27,9 +27,15 @@ interface SettingsModalProps {
   // Toolbar visibility settings
   toolbarSettings: ToolbarSettings;
   onToolbarSettingsChange: (settings: ToolbarSettings) => void;
+  // AI settings
+  aiModels: AIModelInfo[];
+  fastModel: string;
+  baseModel: string;
+  onFastModelChange: (model: string) => void;
+  onBaseModelChange: (model: string) => void;
 }
 
-type SettingsCategory = 'display' | 'markdown';
+type SettingsCategory = 'display' | 'markdown' | 'ai';
 
 interface Category {
   id: SettingsCategory;
@@ -56,6 +62,15 @@ const categories: Category[] = [
       </svg>
     ),
   },
+  {
+    id: 'ai',
+    label: 'AI',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
 ];
 
 // Custom checkbox component
@@ -63,20 +78,25 @@ function Checkbox({
   checked,
   onChange,
   title,
+  disabled = false,
 }: {
   checked: boolean;
-  onChange: (checked: boolean) => void;
+  onChange?: (checked: boolean) => void;
   title?: string;
+  disabled?: boolean;
 }) {
   return (
     <button
-      onClick={() => onChange(!checked)}
+      onClick={() => !disabled && onChange?.(!checked)}
       className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
         checked
           ? 'bg-indigo-600 border-indigo-600'
+          : disabled
+          ? 'bg-slate-100 border-slate-200 cursor-not-allowed'
           : 'bg-white border-slate-300 hover:border-indigo-400'
       }`}
       title={title || (checked ? '在工具栏显示' : '不在工具栏显示')}
+      disabled={disabled}
     >
       {checked && (
         <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -108,6 +128,11 @@ export default function SettingsModal({
   onToggleRemarkGfm,
   toolbarSettings,
   onToolbarSettingsChange,
+  aiModels,
+  fastModel,
+  baseModel,
+  onFastModelChange,
+  onBaseModelChange,
 }: SettingsModalProps) {
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>('display');
 
@@ -384,6 +409,70 @@ export default function SettingsModal({
                     }`}
                   />
                 </button>
+              </div>
+            </div>
+          )}
+
+          {activeCategory === 'ai' && (
+            <div className="space-y-6">
+              <h3 className="text-lg font-semibold text-slate-800 mb-4">AI 模型设置</h3>
+
+              {/* 快速模型 */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Checkbox
+                    checked={false}
+                    disabled
+                    title="快速模型始终在工具栏显示"
+                  />
+                  <div>
+                    <div className="text-sm text-slate-600">快速模型</div>
+                    <div className="text-xs text-slate-400 mt-0.5">用于快速响应的轻量模型</div>
+                  </div>
+                </div>
+                <select
+                  value={fastModel}
+                  onChange={(e) => {
+                    onFastModelChange(e.target.value);
+                    localStorage.setItem('ai-fast-model', e.target.value);
+                  }}
+                  className="h-9 px-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-600 cursor-pointer hover:border-slate-300 focus:outline-none focus:border-indigo-400 min-w-[200px]"
+                >
+                  {aiModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 通用模型 */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Checkbox
+                    checked={toolbarSettings.showBaseModel}
+                    onChange={(v) => handleToolbarSettingChange('showBaseModel', v)}
+                    title="在工具栏显示"
+                  />
+                  <div>
+                    <div className="text-sm text-slate-600">通用模型</div>
+                    <div className="text-xs text-slate-400 mt-0.5">用于复杂推理的高性能模型</div>
+                  </div>
+                </div>
+                <select
+                  value={baseModel}
+                  onChange={(e) => {
+                    onBaseModelChange(e.target.value);
+                    localStorage.setItem('ai-base-model', e.target.value);
+                  }}
+                  className="h-9 px-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-600 cursor-pointer hover:border-slate-300 focus:outline-none focus:border-indigo-400 min-w-[200px]"
+                >
+                  {aiModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           )}

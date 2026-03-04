@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { FONT_OPTIONS, ToolbarSettings, defaultToolbarSettings } from './types';
+import { FONT_OPTIONS, ToolbarSettings, defaultToolbarSettings, AIModelInfo } from './types';
 
 interface ReaderHeaderProps {
   bookTitle: string;
@@ -20,6 +20,10 @@ interface ReaderHeaderProps {
   onToggleHighlight: () => void;
   onOpenSettings: () => void;
   toolbarSettings?: ToolbarSettings;
+  // AI model props
+  aiModels: AIModelInfo[];
+  baseModel: string;
+  onBaseModelChange: (model: string) => void;
 }
 
 export default function ReaderHeader({
@@ -39,6 +43,9 @@ export default function ReaderHeader({
   onToggleHighlight,
   onOpenSettings,
   toolbarSettings = defaultToolbarSettings,
+  aiModels,
+  baseModel,
+  onBaseModelChange,
 }: ReaderHeaderProps) {
   const handleFontSizeDecrease = () => onFontSizeChange(fontSize - 1);
   const handleFontSizeIncrease = () => onFontSizeChange(fontSize + 1);
@@ -190,6 +197,25 @@ export default function ReaderHeader({
                 </svg>
                 下划线
               </button>
+              <div className="w-px h-6 bg-slate-300 mx-1"></div>
+            </>
+          )}
+
+          {/* Base model dropdown */}
+          {toolbarSettings.showBaseModel && (
+            <>
+              <select
+                value={baseModel}
+                onChange={(e) => onBaseModelChange(e.target.value)}
+                className="h-8 px-2 text-xs bg-white border border-slate-200 rounded text-slate-600 cursor-pointer hover:border-slate-300 focus:outline-none focus:border-indigo-400"
+                title="通用模型"
+              >
+                {aiModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name}
+                  </option>
+                ))}
+              </select>
               <div className="w-px h-6 bg-slate-300 mx-1"></div>
             </>
           )}

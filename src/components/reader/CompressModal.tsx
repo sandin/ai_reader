@@ -14,6 +14,7 @@ interface CompressModalProps {
   onClose: () => void;
   content: string;
   messageId: string;
+  modelId?: string;
   onSubmit: (messageId: string, content: string) => void;
 }
 
@@ -22,6 +23,7 @@ export default function CompressModal({
   onClose,
   content,
   messageId,
+  modelId,
   onSubmit,
 }: CompressModalProps) {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -167,6 +169,7 @@ export default function CompressModal({
         body: JSON.stringify({
           content,
           highlights: highlights.map(h => h.text),
+          modelId,
         }),
       });
 

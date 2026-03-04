@@ -1,5 +1,7 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, AIMessage, BaseMessage, SystemMessage } from '@langchain/core/messages';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // 动态导入 LangChainTracer
 let LangChainTracer: any;
@@ -19,7 +21,7 @@ export interface ChatOptions {
   message: string;
   history?: ChatMessage[];
   apiKey: string;
-  modelName?: string;
+  modelName: string;
   temperature?: number;
   maxTokens?: number;
   systemPrompt?: string;
@@ -87,6 +89,100 @@ export const INTENT_TEMPERATURES: Record<Intent, number> = {
   other: 1.3,
 };
 
+// 生成对话标题的 prompt
+export const TITLE_PROMPT = `你是一个阅读助手。请根据用户的第一条提问，为这个对话生成一个简洁的中文标题（不超过20个字）。
+
+要求：
+1. 标题要能准确概括用户提问的主题
+2. 使用简洁的中文
+3. 不需要包含标点符号
+4. 直接返回标题，不要有任何解释`;
+
+// 压缩文本的 prompt 模板
+export function buildCompressPrompt(content: string, highlights?: string[]): string {
+  const highlightText = highlights && highlights.length > 0
+    ? `\n\n用户重点关注的内容：\n${highlights.join('\n')}`
+    : '';
+
+  return `请对以下文本进行压缩精简，缩短篇幅，保留核心内容。重点关注用户选中的相关内容。${highlightText}
+
+原文：
+${content}
+
+请直接输出压缩后的内容，不需要任何额外说明或格式。`;
+}
+
+// 模型配置接口
+interface AIModelConfig {
+  modelName: string;
+  maxTokens: number;
+  baseURL: string;
+  appKey: string;
+  temperature?: {
+    default?: number;
+    summarize?: number;
+    translate?: number;
+    title?: number;
+    compress?: number;
+  };
+}
+
+// 获取模型配置中的 temperature
+function getTemperature(modelConfig: AIModelConfig, taskType: 'default' | 'summarize' | 'translate' | 'title' | 'compress'): number {
+  return modelConfig.temperature?.[taskType] ?? modelConfig.temperature?.default ?? 0.7;
+}
+
+interface AIProvider {
+  name: string;
+  providerType: string;
+  models: AIModelConfig[];
+}
+
+interface ModelsConfig {
+  providers: AIProvider[];
+}
+
+// 缓存模型配置
+let cachedModelsConfig: ModelsConfig | null = null;
+
+/**
+ * 加载模型配置
+ */
+function loadModelsConfig(): ModelsConfig {
+  if (cachedModelsConfig) {
+    return cachedModelsConfig;
+  }
+
+  const configPath = path.join(process.cwd(), 'models.json');
+  const configData = fs.readFileSync(configPath, 'utf-8');
+  cachedModelsConfig = JSON.parse(configData);
+  return cachedModelsConfig!;
+}
+
+/**
+ * 根据 model id (Provider/ModelName 格式) 获取模型配置
+ */
+export function getModelConfigById(modelId: string): AIModelConfig | null {
+  // 解析 model id: "Provider/ModelName"
+  const parts = modelId.split('/');
+  if (parts.length !== 2) {
+    return null;
+  }
+  const [providerName, modelName] = parts;
+
+  const config = loadModelsConfig();
+  for (const provider of config.providers) {
+    if (provider.name === providerName) {
+      for (const model of provider.models) {
+        if (model.modelName === modelName) {
+          return model;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * 创建 LangChain tracer 用于 LangSmith 追踪
  */
@@ -143,16 +239,52 @@ function buildMessages(history?: ChatMessage[], userMessage?: string, systemProm
 
 /**
  * 创建 ChatOpenAI 实例
+ * @param apiKey API 密钥
+ * @param modelId 模型 ID (格式: Provider/ModelName)
+ * @param temperature 温度参数
+ * @param maxTokens 最大 token 数
  */
-function createChatModel(apiKey: string, modelName?: string, temperature?: number, maxTokens?: number): ChatOpenAI {
-  return new ChatOpenAI(modelName || 'deepseek-chat', {
+function createChatModel(apiKey: string, modelId: string, temperature?: number, maxTokens?: number): ChatOpenAI {
+  // 必须提供模型 ID
+  if (!modelId) {
+    throw new Error('Model ID is required');
+  }
+
+  // 根据 modelId 获取模型配置
+  const modelConfig = getModelConfigById(modelId);
+  if (!modelConfig) {
+    throw new Error(`Model ${modelId} not found in configuration`);
+  }
+
+  // 构建选项
+  const options: {
+    temperature: number;
+    maxTokens?: number;
+    apiKey: string;
+    configuration: {
+      baseURL: string;
+    };
+  } = {
     temperature: temperature ?? 0.7,
-    maxTokens: maxTokens ?? 8 * 1024,
     apiKey,
     configuration: {
-      baseURL: 'https://api.deepseek.com',
+      baseURL: modelConfig.baseURL,
     },
-  });
+  };
+
+  // 如果 maxTokens 为 0 或未设置，使用配置中的值（仅当 maxTokens 参数未传递时）
+  if (maxTokens !== undefined) {
+    // 如果显式传递了 maxTokens，使用传递的值（0 也是有效值，表示不限制）
+    if (maxTokens > 0) {
+      options.maxTokens = maxTokens;
+    }
+  } else if (modelConfig.maxTokens > 0) {
+    // 如果没有传递 maxTokens 但配置中有值，使用配置值
+    options.maxTokens = modelConfig.maxTokens;
+  }
+
+  // 使用 modelName 而不是 modelId 来创建模型
+  return new ChatOpenAI(modelConfig.modelName, options);
 }
 
 /**
@@ -176,18 +308,11 @@ export function parseUserMessage(rawMessage: string): { selectedText: string | n
 
 /**
  * 分类用户意图 - 使用 JSON 模式
- * DeepSeek 不支持自定义 response_format，使用 JSON 模式替代
+ * 使用 fastModel 进行意图分类
  */
-export async function classifyIntent(input: string, apiKey: string, modelName?: string): Promise<Intent> {
-  // 使用 JSON 模式
-  const jsonChat = new ChatOpenAI(modelName || 'deepseek-chat', {
-    temperature: 0.3,
-    maxTokens: 100,
-    apiKey,
-    configuration: {
-      baseURL: 'https://api.deepseek.com',
-    },
-  });
+export async function classifyIntent(input: string, apiKey: string, fastModel: string): Promise<Intent> {
+  // 使用 fastModel 进行意图分类
+  const jsonChat = createChatModel(apiKey, fastModel, 0.3, 100);
 
   // 构造提示词，要求返回 JSON
   const prompt = `Analyze the user's intent and return JSON.
@@ -281,6 +406,70 @@ export async function chat(options: ChatOptions): Promise<string> {
 
   // 调用 LLM
   const response = await chat.invoke(messages, { callbacks });
+
+  return response.content as string;
+}
+
+/**
+ * 流式压缩文本
+ * @param modelId 模型 ID (格式: Provider/ModelName)
+ * @param content 要压缩的文本
+ * @param highlights 用户重点关注的内容
+ */
+export async function* streamCompress(modelId: string, content: string, highlights?: string[]): AsyncGenerator<StreamChunk> {
+  // 从模型配置中获取 API key 和配置
+  const modelConfig = getModelConfigById(modelId);
+  if (!modelConfig) {
+    yield { error: `Model ${modelId} not found in configuration` };
+    return;
+  }
+
+  const apiKey = modelConfig.appKey;
+  if (!apiKey) {
+    yield { error: 'API key not configured for this model' };
+    return;
+  }
+
+  // 构建压缩提示词
+  const prompt = buildCompressPrompt(content, highlights);
+
+  // 流式输出，使用模型配置中的 maxTokens 和 temperature
+  for await (const chunk of streamChat({
+    message: prompt,
+    apiKey,
+    modelName: modelId,
+    temperature: getTemperature(modelConfig, 'compress'),
+    maxTokens: modelConfig.maxTokens || undefined,
+  })) {
+    yield chunk;
+  }
+}
+
+/**
+ * 生成对话标题
+ * @param modelId 模型 ID (格式: Provider/ModelName)
+ * @param conversationHistory 对话历史（用户的第一条消息）
+ */
+export async function generateTitle(modelId: string, conversationHistory: string): Promise<string> {
+  // 从模型配置中获取 API key 和配置
+  const modelConfig = getModelConfigById(modelId);
+  if (!modelConfig) {
+    throw new Error(`Model ${modelId} not found in configuration`);
+  }
+
+  const apiKey = modelConfig.appKey;
+  if (!apiKey) {
+    throw new Error('API key not configured for this model');
+  }
+
+  // 创建聊天模型，使用模型配置中的 temperature
+  const chat = createChatModel(apiKey, modelId, getTemperature(modelConfig, 'title'), 100);
+
+  // 调用 LLM
+  const response = await chat.invoke([
+    new SystemMessage(TITLE_PROMPT),
+    new HumanMessage(`用户提问：\n\n${conversationHistory}`),
+  ]);
 
   return response.content as string;
 }

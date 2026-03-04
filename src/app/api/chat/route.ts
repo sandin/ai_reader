@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { streamChat, parseUserMessage, classifyIntent, INTENT_PROMPTS, INTENT_TEMPERATURES, Intent } from '../agent';
+import { streamChat, parseUserMessage, classifyIntent, INTENT_PROMPTS, INTENT_TEMPERATURES, Intent, ChatMessage, getModelConfigById } from '../agent';
 import { query } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 
 // Get chat history from database
-async function getChatHistory(sessionId: number): Promise<{ role: string; content: string }[]> {
+async function getChatHistory(sessionId: number): Promise<ChatMessage[]> {
   const messagesResult = await query(
     'SELECT role, message_content FROM chat_messages WHERE session_id = $1 ORDER BY id',
     [sessionId]
   );
 
-  return messagesResult.rows.map((m: { role: string; message_content: string }) => ({
-    role: m.role,
+  return messagesResult.rows.map((m: { role: string; message_content: string }): ChatMessage => ({
+    role: m.role as 'user' | 'assistant',
     content: m.message_content,
   }));
 }
@@ -54,11 +54,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { sessionId, message, selectedText } = await req.json();
+    const { sessionId, message, selectedText, fastModelId, baseModelId } = await req.json();
 
-    if (!sessionId || !message) {
+    if (!sessionId || !message || !fastModelId || !baseModelId) {
       return NextResponse.json(
-        { error: 'Missing required fields: sessionId, message' },
+        { error: 'Missing required fields: sessionId, message, fastModelId, baseModelId' },
         { status: 400 }
       );
     }
@@ -68,12 +68,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid session ID' }, { status: 400 });
     }
 
-    const apiKey = process.env.DEEPSEEK_API_KEY;
-    const modelName = process.env.LLM_MODEL || 'deepseek-chat';
+    // fastModelId 用于意图分类，baseModelId 用于实际对话
+    const fastModel = fastModelId;
+    const modelName = baseModelId;
 
+    // 从模型配置中获取 API key
+    const modelConfig = getModelConfigById(modelName);
+    if (!modelConfig) {
+      return NextResponse.json(
+        { error: `Model ${modelName} not found in configuration` },
+        { status: 400 }
+      );
+    }
+
+    const apiKey = modelConfig.appKey;
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'DEEPSEEK_API_KEY is not configured' },
+        { error: 'API key not configured for this model' },
         { status: 500 }
       );
     }
@@ -89,7 +100,7 @@ export async function POST(req: NextRequest) {
     await updateSessionTimestamp(numericSessionId);
 
     // 分类用户意图
-    const intent: Intent = await classifyIntent(message, apiKey, modelName);
+    const intent: Intent = await classifyIntent(message, apiKey, fastModel);
 
     // 根据意图选择 system prompt 和 temperature
     const systemPrompt = INTENT_PROMPTS[intent];
