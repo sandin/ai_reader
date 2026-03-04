@@ -945,7 +945,7 @@ export default function ReaderPage() {
   }, [rendition, highlightEnabled]);
 
   const refreshHighlights = useCallback((blocks: Block[]) => {
-    // 先清空旧的高亮，再应用新的
+    // 先清空旧的下划线，再应用新的
     clearHighlights();
 
     if (!highlightEnabled) {

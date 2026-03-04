@@ -293,7 +293,7 @@ export default function SettingsModal({
                 </button>
               </div>
 
-              {/* 高亮 */}
+              {/* 下划线 */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <Checkbox
@@ -302,8 +302,8 @@ export default function SettingsModal({
                     title="在工具栏显示"
                   />
                   <div>
-                    <div className="text-sm text-slate-600">高亮功能</div>
-                    <div className="text-xs text-slate-400 mt-0.5">选中的文字显示高亮背景</div>
+                    <div className="text-sm text-slate-600">下划线功能</div>
+                    <div className="text-xs text-slate-400 mt-0.5">选中的文字显示下划线</div>
                   </div>
                 </div>
                 <button
