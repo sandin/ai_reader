@@ -11,9 +11,10 @@ interface CommentPanelProps {
   onInputChange: (text: string) => void;
   onSave: () => void;
   onDelete: (commentId: string) => void;
-  onEdit: (commentId: string, newContent: string) => void;
+  onEdit: (commentId: string, newContent: string, newSelectedText?: string) => void;
   onJumpToCfi?: (cfiRange: string) => void;
   commentLoading?: boolean;
+  getCurrentSelection?: () => string;
 }
 
 export default function CommentPanel({
@@ -26,28 +27,40 @@ export default function CommentPanel({
   onEdit,
   onJumpToCfi,
   commentLoading = false,
+  getCurrentSelection,
 }: CommentPanelProps) {
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState('');
+  const [editingSelectedText, setEditingSelectedText] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
 
   const handleEditClick = (comment: Comment) => {
     setEditingCommentId(comment.id);
     setEditingContent(comment.content);
+    setEditingSelectedText(comment.selectedText);
   };
 
   const handleEditSave = () => {
     if (editingCommentId && editingContent.trim()) {
-      onEdit(editingCommentId, editingContent.trim());
+      onEdit(editingCommentId, editingContent.trim(), editingSelectedText);
       setEditingCommentId(null);
       setEditingContent('');
+      setEditingSelectedText('');
     }
   };
 
   const handleEditCancel = () => {
     setEditingCommentId(null);
     setEditingContent('');
+  };
+
+  // 更新选中的文字
+  const handleUpdateSelectedText = () => {
+    const selectedText = getCurrentSelection ? getCurrentSelection() : '';
+    if (selectedText) {
+      setEditingSelectedText(selectedText);
+    }
   };
 
   const handleDeleteClick = (commentId: string) => {
@@ -121,14 +134,31 @@ export default function CommentPanel({
               key={comment.id}
               className="group bg-white border border-slate-200 rounded-lg p-3 hover:border-amber-300 transition-colors"
             >
-              <div className="flex items-start justify-between gap-2 mb-2">
-                <p
-                  className="text-xs text-slate-500 line-clamp-2 flex-1 cursor-pointer hover:text-amber-600 hover:underline"
-                  onClick={() => onJumpToCfi?.(comment.cfiRange)}
-                  title="点击跳转到原文"
-                >
-                  "{comment.selectedText}"
-                </p>
+              <div className="flex flex-col gap-2 mb-2">
+                {editingCommentId === comment.id ? (
+                  <>
+                    <p className="text-xs text-slate-700 bg-slate-50 p-2 rounded border border-slate-200">
+                      {editingSelectedText || '在正文中选择文字更新引用'}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs text-slate-400">提示：先在正文中重新选择一段文字</p>
+                      <button
+                        onClick={handleUpdateSelectedText}
+                        className="px-2 py-1 text-xs bg-amber-100 text-amber-700 rounded hover:bg-amber-200 transition-colors"
+                      >
+                        更新引文
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <p
+                    className="text-xs text-slate-500 cursor-pointer hover:text-amber-600 hover:underline"
+                    onClick={() => onJumpToCfi?.(comment.cfiRange)}
+                    title="点击跳转到原文"
+                  >
+                    "{comment.selectedText}"
+                  </p>
+                )}
               </div>
 
               {/* Edit mode */}

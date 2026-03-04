@@ -1406,12 +1406,30 @@ export default function ReaderPage() {
     }
   };
 
-  const handleEditComment = async (commentId: string, newContent: string) => {
+  // 获取当前选中的文本
+  const getCurrentSelection = useCallback((): string => {
+    const container = viewerRef.current;
+    const iframe = container?.querySelector('iframe');
+    if (iframe && iframe.contentWindow) {
+      const selection = iframe.contentWindow.getSelection();
+      return selection ? selection.toString().trim() : '';
+    }
+    return '';
+  }, [viewerRef]);
+
+  const handleEditComment = async (commentId: string, newContent: string, newSelectedText?: string) => {
     const comment = comments.find(c => c.id === commentId);
     if (!comment) return;
 
     const updatedComments = comments.map(c =>
-      c.id === commentId ? { ...c, content: newContent, timestamp: Date.now() } : c
+      c.id === commentId
+        ? {
+            ...c,
+            content: newContent,
+            selectedText: newSelectedText || c.selectedText,
+            timestamp: Date.now()
+          }
+        : c
     );
     setComments(updatedComments);
 
@@ -1788,6 +1806,7 @@ export default function ReaderPage() {
                   onEdit={handleEditComment}
                   onJumpToCfi={handleJumpToCfi}
                   commentLoading={commentLoading}
+                  getCurrentSelection={getCurrentSelection}
                 />
               )}
             </Panel>
