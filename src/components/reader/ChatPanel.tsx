@@ -47,6 +47,7 @@ interface ChatPanelProps {
   onInputLayoutChange?: (sizes: { [key: string]: number }) => void;
   onOpenCompress?: (content: string, messageId: string) => void;
   onEditMessage?: (messageId: string, newContent: string) => void;
+  onJumpToCfi?: (cfiRange: string) => void;
 }
 
 export default function ChatPanel({
@@ -80,6 +81,7 @@ export default function ChatPanel({
   onInputLayoutChange,
   onOpenCompress,
   onEditMessage,
+  onJumpToCfi,
 }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -302,6 +304,18 @@ export default function ChatPanel({
                       >
                         <p className="whitespace-pre-wrap break-words">{displayContent}</p>
                         <div className="absolute top-2 right-2 flex items-center gap-1">
+                          {block.cfiRange && (
+                            <button
+                              onClick={() => onJumpToCfi?.(block.cfiRange!)}
+                              className="w-5 h-5 flex items-center justify-center rounded-full text-slate-400 hover:text-amber-500 hover:bg-amber-50 transition-colors"
+                              title="跳转到原文"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                              </svg>
+                            </button>
+                          )}
                           {shouldTruncate && (
                             <button
                               onClick={() => onToggleExpandBlock(block.id)}

@@ -928,6 +928,7 @@ export default function ReaderPage() {
     if (!rendition) return;
     highlightRefs.current.forEach((cfiRange) => {
       try { rendition.annotations.remove(cfiRange, 'highlight'); } catch (e) { /* ignore */ }
+      try { rendition.annotations.remove(cfiRange, 'underline'); } catch (e) { /* ignore */ }
     });
     highlightRefs.current.clear();
   }, [rendition]);
@@ -935,10 +936,10 @@ export default function ReaderPage() {
   const highlightBlock = useCallback((block: Block) => {
     if (!rendition || !block.cfiRange || !highlightEnabled) return;
     if (highlightRefs.current.has(block.id)) {
-      try { rendition.annotations.remove(block.cfiRange, 'highlight'); } catch (e) { /* ignore */ }
+      try { rendition.annotations.remove(block.cfiRange, 'underline'); } catch (e) { /* ignore */ }
     }
     try {
-      rendition.annotations.highlight(block.cfiRange, {}, () => {});
+      rendition.annotations.underline(block.cfiRange, {}, () => {});
       highlightRefs.current.set(block.id, block.cfiRange);
     } catch (e) { /* ignore */ }
   }, [rendition, highlightEnabled]);
@@ -1132,13 +1133,13 @@ export default function ReaderPage() {
     }
   }, [currentChapter, isContentReady, loadChatForChapter, loadCommentsForChapter]);
 
-  // Render comments as underlines
+  // Render comments as highlights
   useEffect(() => {
     if (!rendition || comments.length === 0) return;
     comments.forEach(comment => {
       if (comment.cfiRange && !commentRefs.current.has(comment.id)) {
         try {
-          rendition.annotations.underline(comment.cfiRange, {}, undefined, 'comment-underline', {
+          rendition.annotations.highlight(comment.cfiRange, {}, undefined, 'comment-highlight', {
             "color": "red"
           });
           commentRefs.current.set(comment.id, comment.cfiRange);
@@ -1356,7 +1357,7 @@ export default function ReaderPage() {
 
     if (rendition && commentCfiRange) {
       try {
-        rendition.annotations.underline(commentCfiRange, {}, undefined, 'comment-underline');
+        rendition.annotations.highlight(commentCfiRange, {}, undefined, 'comment-highlight');
         commentRefs.current.set(newComment.id, commentCfiRange);
       } catch (e) { /* ignore */ }
     }
@@ -1384,7 +1385,7 @@ export default function ReaderPage() {
 
     if (rendition && commentRefs.current.has(commentId)) {
       try {
-        rendition.annotations.remove(commentRefs.current.get(commentId)!, 'underline');
+        rendition.annotations.remove(commentRefs.current.get(commentId)!, 'highlight');
         commentRefs.current.delete(commentId);
       } catch (e) { /* ignore */ }
     }
@@ -1771,6 +1772,7 @@ export default function ReaderPage() {
                         : msg
                     ));
                   }}
+                  onJumpToCfi={handleJumpToCfi}
                 />
               )}
 
