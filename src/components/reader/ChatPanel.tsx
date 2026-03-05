@@ -92,6 +92,10 @@ export default function ChatPanel({
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [editingMessage, setEditingMessage] = useState<{ id: string; content: string } | null>(null);
+  const [viewingMermaid, setViewingMermaid] = useState<{ content: string } | null>(null);
+
+  // 检查消息内容是否为 mermaid 类型
+  const isMermaidMessage = (content: string) => content.trim().startsWith('```mermaid');
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
@@ -404,6 +408,20 @@ export default function ChatPanel({
                     </div>
                     {/* Copy and delete buttons row - always visible space, buttons show on hover */}
                     <div className="h-6 mt-1 flex justify-end items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {/* Mermaid view button - only for mermaid messages */}
+                      {msg.role === 'assistant' && isMermaidMessage(msg.content) && (
+                        <button
+                          onClick={() => {
+                            setViewingMermaid({ content: msg.content });
+                          }}
+                          className="w-5 h-5 flex items-center justify-center rounded text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 transition-colors"
+                          title="查看图表"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                          </svg>
+                        </button>
+                      )}
                       {msg.role === 'assistant' && (
                         <button
                           onClick={() => {
@@ -614,6 +632,14 @@ export default function ChatPanel({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Mermaid view dialog */}
+      {viewingMermaid && (
+        <MermaidViewer
+          content={viewingMermaid.content}
+          onClose={() => setViewingMermaid(null)}
+        />
       )}
     </PanelGroup>
   );
@@ -860,5 +886,174 @@ function MermaidChart({ code }: { code: string }) {
       className="mb-3 overflow-x-auto flex justify-center"
       dangerouslySetInnerHTML={{ __html: svg }}
     />
+  );
+}
+
+// Mermaid viewer dialog component
+function MermaidViewer({ content, onClose }: { content: string; onClose: () => void }) {
+  const [svg, setSvg] = useState<string>('');
+  const [error, setError] = useState<string>('');
+  const [scale, setScale] = useState(1.0);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const idRef = useRef<string>(`mermaid-viewer-${Math.random().toString(36).substring(2, 11)}`);
+
+  useEffect(() => {
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'default',
+      mindmap: {
+        padding: 25,
+      },
+    });
+
+    // Extract mermaid code from content
+    const codeMatch = content.match(/```mermaid\n?([\s\S]*?)```/);
+    const code = codeMatch ? codeMatch[1].trim() : content;
+
+    const renderChart = async () => {
+      try {
+        const { svg } = await mermaid.render(idRef.current, code);
+        setSvg(svg);
+        setError('');
+      } catch (err) {
+        console.error('Mermaid render error:', err);
+        setError(err instanceof Error ? err.message : '图表渲染失败');
+        setSvg('');
+      }
+    };
+
+    renderChart();
+  }, [content]);
+
+  // Handle mouse wheel for zoom
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    setScale(prev => Math.max(0.1, Math.min(3, prev + delta)));
+  };
+
+  // Handle pan
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button === 0) {
+      setIsDragging(true);
+      setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (isDragging) {
+      setPosition({
+        x: e.clientX - dragStart.x,
+        y: e.clientY - dragStart.y,
+      });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  // Reset view
+  const handleReset = () => {
+    setScale(1);
+    setPosition({ x: 0, y: 0 });
+  };
+
+  // Handle click outside to close
+  const handleOverlayClick = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) {
+      onClose();
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      onClick={handleOverlayClick}
+    >
+      <div className="bg-white w-full h-full max-w-[95vw] max-h-[95vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white shrink-0">
+          <h3 className="text-lg font-semibold text-slate-800">Mermaid 图表</h3>
+          <div className="flex items-center gap-2">
+            {/* Zoom controls */}
+            <button
+              onClick={() => setScale(prev => Math.min(3, prev + 0.2))}
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              title="放大"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+              </svg>
+            </button>
+            <button
+              onClick={() => setScale(prev => Math.max(0.1, prev - 0.2))}
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              title="缩小"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7" />
+              </svg>
+            </button>
+            <button
+              onClick={handleReset}
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              title="重置"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+            <span className="text-sm text-slate-400 min-w-[50px] text-center">{Math.round(scale * 100)}%</span>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors ml-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div
+          ref={containerRef}
+          className="flex-1 overflow-hidden bg-slate-50 cursor-grab active:cursor-grabbing"
+          onWheel={handleWheel}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+        >
+          {error ? (
+            <div className="text-center max-w-2xl mx-auto p-8">
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 text-yellow-700 mb-4">
+                ⚠️ 图表渲染失败: {error}
+              </div>
+              <pre className="bg-slate-800 text-slate-100 p-4 rounded-lg overflow-x-auto text-sm max-w-full">
+                <code>{content.match(/```mermaid\n?([\s\S]*?)```/)?.[1] || content}</code>
+              </pre>
+            </div>
+          ) : (
+            <div
+              className="w-full h-full items-center justify-center p-8"
+              style={{
+                transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
+                transformOrigin: 'center center',
+                transition: isDragging ? 'none' : 'transform 0.1s ease-out',
+              }}
+            >
+              <div
+                dangerouslySetInnerHTML={{ __html: svg }}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
