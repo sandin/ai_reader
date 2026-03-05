@@ -24,6 +24,7 @@ import {
   defaultToolbarSettings,
   AIModelInfo,
 } from '@/components/reader';
+import SearchModal from '@/components/SearchModal';
 
 export default function ReaderPage() {
   const params = useParams();
@@ -112,6 +113,7 @@ export default function ReaderPage() {
 
   // Settings modal state
   const [showSettings, setShowSettings] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [toolbarSettings, setToolbarSettings] = useState(defaultToolbarSettings);
 
   // AI model state - load from localStorage or use defaults
@@ -1588,6 +1590,7 @@ export default function ReaderPage() {
           localStorage.setItem('reader-highlight-enabled', String(newValue));
         }}
         onOpenSettings={() => setShowSettings(true)}
+        onOpenSearch={() => setSearchOpen(true)}
         toolbarSettings={toolbarSettings}
         aiModels={aiModels}
         baseModel={baseModel}
@@ -1956,6 +1959,9 @@ export default function ReaderPage() {
         modelId={fastModel || aiModels[0]?.id || ''}
         onSubmit={handleCompressSubmit}
       />
+
+      {/* Search Modal */}
+      <SearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   );
 }

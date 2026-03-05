@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { authenticateRequest, requireAuth } from '@/lib/auth';
+import { syncCommentToVectorStore, deleteCommentFromVectorStore } from '@/app/api/agent';
 
 // GET: 获取章节的评论
 export async function GET(
@@ -62,8 +63,9 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ bookId: string; htmlFile: string }> }
 ) {
+  let auth: { userId: number; username: string; schema: string };
   try {
-    await requireAuth(request);
+    auth = await requireAuth(request);
   } catch {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -101,14 +103,30 @@ export async function POST(
 
     // Handle comments
     if (comments && Array.isArray(comments)) {
+      // Get existing comment IDs for vector store deletion
+      const existingComments = await query(
+        'SELECT id FROM comments WHERE book_id = $1 AND chapter_file = $2',
+        [numericBookId, chapterFile]
+      );
+
+      // Delete existing comments from vector store
+      for (const existingComment of existingComments.rows) {
+        try {
+          await deleteCommentFromVectorStore(existingComment.id, auth.userId);
+        } catch (e) {
+          console.error('Failed to delete comment from vector store:', e);
+        }
+      }
+
+      // Delete existing comments from DB
       await query(
         'DELETE FROM comments WHERE book_id = $1 AND chapter_file = $2',
         [numericBookId, chapterFile]
       );
 
       for (const comment of comments) {
-        await query(
-          'INSERT INTO comments (book_id, chapter_file, comment_content, selected_text, cfi_range, comment_timestamp) VALUES ($1, $2, $3, $4, $5, $6)',
+        const result = await query(
+          'INSERT INTO comments (book_id, chapter_file, comment_content, selected_text, cfi_range, comment_timestamp) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
           [
             numericBookId,
             chapterFile,
@@ -118,6 +136,21 @@ export async function POST(
             comment.timestamp || now
           ]
         );
+        const commentId = result.rows[0].id;
+
+        // Sync to vector store
+        try {
+          await syncCommentToVectorStore(
+            commentId,
+            comment.content,
+            comment.selectedText || '',
+            auth.userId,
+            numericBookId,
+            chapterFile
+          );
+        } catch (e) {
+          console.error('Failed to sync comment to vector store:', e);
+        }
       }
     }
 

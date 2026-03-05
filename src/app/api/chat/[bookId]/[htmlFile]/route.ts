@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { authenticateRequest, requireAuth } from '@/lib/auth';
+import { syncMessageToVectorStore, deleteMessageFromVectorStore } from '@/app/api/agent';
 
 // GET: 获取会话（按章节过滤）
 export async function GET(
@@ -103,8 +104,9 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ bookId: string; htmlFile: string }> }
 ) {
+  let auth: { userId: number; username: string; schema: string };
   try {
-    await requireAuth(request);
+    auth = await requireAuth(request);
   } catch {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -153,7 +155,20 @@ export async function DELETE(
     if (messageId) {
       const numericMessageId = parseInt(messageId, 10);
       if (!isNaN(numericMessageId)) {
+        // Get session_id before deleting
+        const msgResult = await query('SELECT session_id FROM chat_messages WHERE id = $1', [numericMessageId]);
+        const sessionIdVal = msgResult.rows[0]?.session_id;
+
         await query('DELETE FROM chat_messages WHERE id = $1', [numericMessageId]);
+
+        // Delete from vector store
+        if (sessionIdVal) {
+          try {
+            await deleteMessageFromVectorStore(sessionIdVal, numericMessageId, auth.userId);
+          } catch (e) {
+            console.error('Failed to delete message from vector store:', e);
+          }
+        }
       }
       return NextResponse.json({ success: true });
     }
@@ -162,6 +177,16 @@ export async function DELETE(
     if (sessionId) {
       const numericSessionId = parseInt(sessionId);
       if (!isNaN(numericSessionId)) {
+        // Delete all messages from vector store first
+        try {
+          const msgResult = await query('SELECT id FROM chat_messages WHERE session_id = $1', [numericSessionId]);
+          for (const msg of msgResult.rows) {
+            await deleteMessageFromVectorStore(numericSessionId, msg.id, auth.userId);
+          }
+        } catch (e) {
+          console.error('Failed to delete messages from vector store:', e);
+        }
+
         await query('DELETE FROM chat_sessions WHERE id = $1', [numericSessionId]);
       }
     }
@@ -178,8 +203,9 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ bookId: string; htmlFile: string }> }
 ) {
+  let auth: { userId: number; username: string; schema: string };
   try {
-    await requireAuth(request);
+    auth = await requireAuth(request);
   } catch {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -312,10 +338,27 @@ export async function POST(
     // Insert messages
     if (dbSessionId && messages && Array.isArray(messages)) {
       for (const msg of messages) {
-        await query(
-          'INSERT INTO chat_messages (session_id, role, message_content, message_timestamp) VALUES ($1, $2, $3, $4)',
+        const result = await query(
+          'INSERT INTO chat_messages (session_id, role, message_content, message_timestamp) VALUES ($1, $2, $3, $4) RETURNING id',
           [dbSessionId, msg.role, msg.content || '', msg.timestamp || now]
         );
+        const messageId = result.rows[0].id;
+
+        // 同步到向量数据库
+        if (msg.content && msg.role === 'assistant') {
+          try {
+            await syncMessageToVectorStore(
+              dbSessionId,
+              messageId,
+              msg.content,
+              auth.userId,
+              numericBookId,
+              chapterFile
+            );
+          } catch (e) {
+            console.error('Failed to sync message to vector store:', e);
+          }
+        }
       }
     }
 

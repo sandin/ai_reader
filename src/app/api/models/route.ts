@@ -16,7 +16,8 @@ interface AIProvider {
 }
 
 interface ModelsConfig {
-  providers: AIProvider[];
+  chat_models: AIProvider[];
+  embeddings_models?: AIModelConfig[];
 }
 
 let cachedConfig: ModelsConfig | null = null;
@@ -38,8 +39,8 @@ export async function GET() {
   const config = loadModelsConfig();
 
   // 返回简化模型列表格式：Provider/ModelName
-  const models = config.providers.flatMap(provider =>
-    provider.models.map(model => ({
+  const models = config.chat_models.flatMap((provider: AIProvider) =>
+    provider.models.map((model: AIModelConfig) => ({
       id: `${provider.name}/${model.modelName}`,
       name: `${provider.name}/${model.modelName}`,
     }))
