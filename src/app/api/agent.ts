@@ -33,7 +33,7 @@ export interface StreamChunk {
 }
 
 // 意图类型
-export type Intent = 'summarize' | 'translate' | 'other';
+export type Intent = 'summarize' | 'translate' | 'mindmap' | 'other';
 
 // 意图对应的 system prompts
 export const INTENT_PROMPTS: Record<Intent, string> = {
@@ -71,6 +71,13 @@ How can I help you?
 若输入仅含单语内容，按句子分段翻译
 若输入格式混乱，先进行句子规范化再翻译
 请确认要求后，回复"请提供需要翻译的内容"以开始流程。`,
+  mindmap: `根据用户的要求，使用 mermaid 生成 mindmap.
+
+要求：
+* 中文内容使用双引号包裹，例如: "中文内容"
+* 内容中不能使用的符号: ( )
+* 只返回 mermaid 的内容(markdown格式), 不要返回其他AI回答的文字内容`
+,
   other: `你是一个阅读助手，专门帮助用户理解和分析电子书中的内容，回答用户的问题。`,
 };
 
@@ -86,6 +93,7 @@ How can I help you?
 export const INTENT_TEMPERATURES: Record<Intent, number> = {
   summarize: 1.0,
   translate: 1.3,
+  mindmap: 1.3,
   other: 1.3,
 };
 
@@ -121,7 +129,7 @@ interface AIModelConfig {
 }
 
 // 获取任务对应的 temperature，使用 INTENT_TEMPERATURES 配置
-function getTemperature(taskType: 'default' | 'summarize' | 'translate' | 'title' | 'compress'): number {
+function getTemperature(taskType: 'default' | 'summarize' | 'translate' | 'mindmap' | 'title' | 'compress'): number {
   // title 和 compress 使用默认的 0.7
   if (taskType === 'title' || taskType === 'compress') {
     return 0.7;
@@ -130,7 +138,7 @@ function getTemperature(taskType: 'default' | 'summarize' | 'translate' | 'title
   if (taskType === 'default') {
     return INTENT_TEMPERATURES.other;
   }
-  // summarize, translate 使用 INTENT_TEMPERATURES
+  // summarize, translate, mindmap 使用 INTENT_TEMPERATURES
   return INTENT_TEMPERATURES[taskType] ?? 0.7;
 }
 
@@ -326,9 +334,10 @@ export async function classifyIntent(input: string, apiKey: string, fastModel: s
 Rules:
 - If user wants to summarize, summarize, or extract core ideas, return "summarize"
 - If user wants to translate to another language, return "translate"
+- If user wants to create a mind map, mindmap, or generate mind map, return "mindmap"
 - For all other cases, return "other"
 
-Only return JSON in this format: {"intent": "summarize|translate|other"}`;
+Only return JSON in this format: {"intent": "summarize|translate|mindmap|other"}`;
 
   const response = await jsonChat.invoke([
     new SystemMessage(prompt),
@@ -342,7 +351,7 @@ Only return JSON in this format: {"intent": "summarize|translate|other"}`;
     const content = response.content as string;
     const parsed = JSON.parse(content);
     const intent = parsed.intent;
-    if (intent === 'summarize' || intent === 'translate' || intent === 'other') {
+    if (intent === 'summarize' || intent === 'translate' || intent === 'mindmap' || intent === 'other') {
       return intent;
     }
     return 'other';
