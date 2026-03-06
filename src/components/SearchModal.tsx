@@ -13,6 +13,7 @@ interface SearchResult {
   chapter_file: string;
   book_title?: string;
   book_author?: string;
+  score: number; // 相似度分数（Chroma 中分数越低越相似）
 }
 
 interface SearchModalProps {
@@ -312,6 +313,9 @@ export default function SearchModal({ isOpen, onClose }: SearchModalProps) {
                           )}
                         </div>
                       </div>
+                      <span className="text-xs text-slate-400 flex-shrink-0">
+                        {Math.round((1 - result.score) * 100)}% 相似
+                      </span>
                     </div>
                     <p className="text-sm text-slate-600 line-clamp-3">
                       {truncateContent(result.content)}

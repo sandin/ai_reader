@@ -13,6 +13,7 @@ export interface SearchResult {
   comment_id?: number;
   book_id: number;
   chapter_file: string;
+  score: number; // 相似度分数（Chroma 中分数越低越相似）
 }
 
 /**
@@ -300,9 +301,12 @@ export async function searchVectorStore(
     filter = { $eq: { type: filterType } };
   }
 
-  const results = await vectorStore.similaritySearch(query, k, filter as any);
+  const results = await vectorStore.similaritySearchWithScore(query, k, filter as any);
 
-  return results.map((doc) => ({
+  // 过滤掉相似度低于 -10% 的结果 (score > 1.1)
+  const filteredResults = results.filter(([, score]) => score <= 1.1);
+
+  return filteredResults.map(([doc, score]) => ({
     content: doc.pageContent,
     type: doc.metadata.type as 'session' | 'comment',
     session_id: doc.metadata.session_id,
@@ -310,5 +314,6 @@ export async function searchVectorStore(
     comment_id: doc.metadata.comment_id,
     book_id: doc.metadata.book_id,
     chapter_file: doc.metadata.chapter_file,
+    score,
   }));
 }
