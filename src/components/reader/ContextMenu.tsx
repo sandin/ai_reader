@@ -81,6 +81,29 @@ export default function ContextMenu({
       {/* separator */}
       <div className="my-1 border-t border-slate-200" />
 
+      {/* comment group */}
+      <button
+        onClick={onAddComment}
+        className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 transition-colors"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+        </svg>
+        <span>添加评论</span>
+      </button>
+      <button
+        onClick={onAddHighlight}
+        className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 transition-colors"
+      >
+        <svg className="w-4 h-4" fill="#EAB308" viewBox="0 0 24 24">
+          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+        </svg>
+        <span>划重点</span>
+      </button>
+
+      {/* separator */}
+      <div className="my-1 border-t border-slate-200" />
+
       {/* chat group */}
       <button
         onClick={onAddToAssistantNewChat}
@@ -108,29 +131,6 @@ export default function ContextMenu({
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
         </svg>
         <span>添加选中</span>
-      </button>
-
-      {/* separator */}
-      <div className="my-1 border-t border-slate-200" />
-
-      {/* comment group */}
-      <button
-        onClick={onAddComment}
-        className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 transition-colors"
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-        </svg>
-        <span>添加评论</span>
-      </button>
-      <button
-        onClick={onAddHighlight}
-        className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 transition-colors"
-      >
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-        </svg>
-        <span>划重点</span>
       </button>
     </div>
   );
