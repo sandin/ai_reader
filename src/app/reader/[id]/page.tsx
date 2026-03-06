@@ -25,6 +25,7 @@ import {
   AIModelInfo,
 } from '@/components/reader';
 import SearchModal from '@/components/SearchModal';
+import { withOptimisticUpdate } from '@/lib/useOptimisticUpdate';
 
 export default function ReaderPage() {
   const params = useParams();
@@ -1311,9 +1312,11 @@ export default function ReaderPage() {
       timestamp: Date.now(),
     };
 
+    // 先在本地添加高亮（乐观更新）
     const updatedComments = [...comments, newComment];
     setComments(updatedComments);
 
+    // 同步更新 rengition annotations
     if (rendition && contextMenuCfiRange) {
       try {
         rendition.annotations.highlight(contextMenuCfiRange, {}, undefined, 'comment-highlight');
@@ -1321,10 +1324,12 @@ export default function ReaderPage() {
       } catch (e) { /* ignore */ }
     }
 
-    // 保存到数据库
+    setShowContextMenu(false);
+
+    // 异步保存到数据库，失败则回滚
     if (bookId && currentChapter) {
-      try {
-        await fetch('/api/comment/' + bookId + '/' + encodeURIComponent(currentChapter), {
+      const apiCall = async () => {
+        const res = await fetch('/api/comment/' + bookId + '/' + encodeURIComponent(currentChapter), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1335,12 +1340,19 @@ export default function ReaderPage() {
             },
           }),
         });
-      } catch (err) {
-        console.error('Failed to save highlight:', err);
-      }
-    }
+        if (!res.ok) throw new Error('Failed to save highlight');
+      };
 
-    setShowContextMenu(false);
+      const rollback = (prev: Comment[]) => prev.filter(c => c.id !== newComment.id);
+
+      await withOptimisticUpdate(
+        setComments,
+        apiCall,
+        updatedComments,
+        rollback,
+        '保存高亮失败，已撤销更改'
+      );
+    }
   };
 
   const handleSummarize = async () => {
@@ -1444,29 +1456,7 @@ export default function ReaderPage() {
     setCommentCfiRange('');
   };
 
-  const handleDeleteComment = async (commentId: string) => {
-    const comment = comments.find(c => c.id === commentId);
-    if (!comment) return;
-
-    if (rendition && commentRefs.current.has(commentId)) {
-      try {
-        rendition.annotations.remove(commentRefs.current.get(commentId)!, 'highlight');
-        commentRefs.current.delete(commentId);
-      } catch (e) { /* ignore */ }
-    }
-
-    const updatedComments = comments.filter(c => c.id !== commentId);
-    setComments(updatedComments);
-
-    if (currentChapter && bookId) {
-      const htmlFile = currentChapter.split('#')[0];
-      const encodedHtmlFile = encodeURIComponent(htmlFile);
-      try {
-        await fetch(`/api/comment/${bookId}/${encodedHtmlFile}?commentId=${commentId}`, {
-          method: 'DELETE',
-        });
-      } catch (err) { /* ignore */ }
-    }
+const handleDeleteComment = async (commentId: string) => {    const comment = comments.find(c => c.id === commentId);    if (!comment) return;    // 同步移除 rendition annotations    if (rendition && commentRefs.current.has(commentId)) {      try {        rendition.annotations.remove(commentRefs.current.get(commentId)!, 'highlight');        commentRefs.current.delete(commentId);      } catch (e) { /* ignore */ }    }    // 先在本地删除（乐观更新）    const updatedComments = comments.filter(c => c.id !== commentId);    setComments(updatedComments);    // 异步删除，失败则回滚    if (currentChapter && bookId) {      const apiCall = async () => {        const htmlFile = currentChapter.split('#')[0];        const encodedHtmlFile = encodeURIComponent(htmlFile);        const res = await fetch(`/api/comment/${bookId}/${encodedHtmlFile}?commentId=${commentId}`, {          method: 'DELETE',        });        if (!res.ok) throw new Error('Failed to delete comment');      };      const rollback = (prev: Comment[]) => [...prev, comment];      await withOptimisticUpdate(        setComments,        apiCall,        updatedComments,        rollback,        '删除评论失败，已恢复'      );    }  };
   };
 
   // 获取当前选中的文本
