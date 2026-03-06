@@ -3,6 +3,7 @@ import { verifyToken } from '@/lib/auth';
 import { setCurrentUser } from '@/lib/db';
 import { searchVectorStore } from '@/lib/ai/vector';
 import { query } from '@/lib/db';
+import type { TreeNode } from '@/components/reader/types';
 
 // Bearer Token 鉴权 - 使用 JWT
 function authenticateBearerToken(request: Request): { userId: number; username: string } | null {
@@ -34,6 +35,46 @@ interface MCPRequest {
   params?: Record<string, unknown>;
 }
 
+
+// 根据 chapterFile 在索引树中查找章节的完整路径（包含所有父级）
+function findChapterPath(tree: TreeNode[], targetFile: string, parentPath: string[] = []): string[] | null {
+  for (const node of tree) {
+    // 从 href 中提取文件名进行匹配
+    const nodeFile = node.href?.split('#')[0].split('/').pop() || '';
+    const targetFileName = targetFile.split('#')[0].split('/').pop() || '';
+
+    if (nodeFile === targetFileName || node.contents.some(c => c.split('#')[0].split('/').pop() === targetFileName)) {
+      // 找到匹配的章节，返回完整路径
+      return [...parentPath, node.chapter_name];
+    }
+
+    // 递归搜索子节点
+    if (node.children && node.children.length > 0) {
+      const result = findChapterPath(node.children, targetFile, [...parentPath, node.chapter_name]);
+      if (result) {
+        return result;
+      }
+    }
+  }
+  return null;
+}
+
+// 获取章节显示名称（包含层级）
+function getChapterDisplayName(chapterFile: string, indexData: { tree: TreeNode[] } | null): string {
+  if (!indexData || !indexData.tree || indexData.tree.length === 0) {
+    // 如果没有索引数据，回退到原来的处理方式
+    return chapterFile.replace('.html', '').replace(/_/g, ' ');
+  }
+
+  const path = findChapterPath(indexData.tree, chapterFile);
+  if (path && path.length > 0) {
+    return path.join(' / ');
+  }
+
+  // 如果没找到，回退到原来的处理方式
+  return chapterFile.replace('.html', '').replace(/_/g, ' ');
+}
+
 // 搜索向量数据库
 async function searchBooks(keyword: string, userId: number): Promise<string> {
   const searchResults = await searchVectorStore(keyword, userId, 10);
@@ -46,6 +87,7 @@ async function searchBooks(keyword: string, userId: number): Promise<string> {
     [bookId: number]: {
       book_title: string;
       book_author: string;
+      index_data: { tree: TreeNode[] } | null;
       chapters: {
         [chapterFile: string]: {
           comments: Array<{ id: number; selected_text: string; content: string }>;
@@ -63,9 +105,9 @@ async function searchBooks(keyword: string, userId: number): Promise<string> {
     const bookId = result.book_id;
 
     if (!groupedResults[bookId]) {
-      const bookResult = await query('SELECT title, author FROM books WHERE id = $1', [bookId]);
-      const book = bookResult.rows[0] || { title: '未知书籍', author: '未知作者' };
-      groupedResults[bookId] = { book_title: book.title, book_author: book.author, chapters: {} };
+      const bookResult = await query('SELECT title, author, index_data FROM books WHERE id = $1', [bookId]);
+      const book = bookResult.rows[0] || { title: '未知书籍', author: '未知作者', index_data: null };
+      groupedResults[bookId] = { book_title: book.title, book_author: book.author, index_data: book.index_data, chapters: {} };
     }
 
     const chapterFile = result.chapter_file;
@@ -105,8 +147,8 @@ async function searchBooks(keyword: string, userId: number): Promise<string> {
     const book = groupedResults[Number(bookId)];
     markdown += `# ${book.book_title}\n${book.book_author}\n\n`;
 
-    for (const chapterFile of Object.keys(book.chapters)) {
-      const chapterName = chapterFile.replace('.html', '').replace(/_/g, ' ');
+    for (const chapterFile of Object.keys(book.chapters).sort()) {
+      const chapterName = getChapterDisplayName(chapterFile, book.index_data);
       markdown += `## ${chapterName}\n\n`;
 
       const chapter = book.chapters[chapterFile];
@@ -144,7 +186,7 @@ async function handleMCPRequest(request: MCPRequest, userId: number) {
       tools: [
         {
           name: 'search_book',
-          description: '搜索书籍中的评论和对话内容，返回按书籍和章节分组的Markdown格式结果',
+          description: '当用户需要在其个人图书库（他看过的书籍）中搜索时使用此工具。可以搜索书籍中的内容，评论、笔记和AI对话内容。输入关键词，返回按书籍和章节分组的Markdown格式结果。',
           inputSchema: {
             type: 'object',
             properties: { keyword: { type: 'string', description: '搜索关键词' } },
