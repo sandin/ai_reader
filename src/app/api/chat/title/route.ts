@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateTitle } from '../../agent';
+import { generateTitle } from '@/lib/ai';
 import { query } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 

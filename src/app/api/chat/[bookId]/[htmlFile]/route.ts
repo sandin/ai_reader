@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { authenticateRequest, requireAuth } from '@/lib/auth';
-import { syncMessageToVectorStore, deleteMessageFromVectorStore } from '@/app/api/agent';
+import { syncMessageToVectorStore, deleteMessageFromVectorStore } from '@/lib/ai';
 
 // GET: 获取会话（按章节过滤）
 export async function GET(

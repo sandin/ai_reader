@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { authenticateRequest, requireAuth } from '@/lib/auth';
-import { syncCommentToVectorStore, deleteCommentFromVectorStore } from '@/app/api/agent';
+import { syncCommentToVectorStore, deleteCommentFromVectorStore } from '@/lib/ai';
 
 // GET: 获取章节的评论
 export async function GET(

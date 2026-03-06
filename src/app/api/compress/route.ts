@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { streamCompress } from '../agent';
+import { streamCompress } from '@/lib/ai';
 
 export async function POST(req: NextRequest) {
   try {

@@ -14,7 +14,7 @@
 import 'dotenv/config';
 
 import pool from '../src/lib/db';
-import { getVectorStore, splitText } from '../src/app/api/agent';
+import { getVectorStore, splitText } from '../src/lib/ai';
 import { Document } from '@langchain/core/documents';
 
 interface ChatMessage {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { searchVectorStore } from '@/app/api/agent';
+import { searchVectorStore } from '@/lib/ai';
 import { query } from '@/lib/db';
 
 // 搜索结果类型

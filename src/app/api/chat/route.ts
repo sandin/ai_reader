@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { streamChat, parseUserMessage, classifyIntent, INTENT_PROMPTS, INTENT_TEMPERATURES, Intent, ChatMessage, getModelConfigById } from '../agent';
+import { streamChat, parseUserMessage, classifyIntent, INTENT_PROMPTS, INTENT_TEMPERATURES, Intent, ChatMessage, getModelConfigById } from '@/lib/ai';
 import { query } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 
