@@ -154,9 +154,9 @@ export async function GET(request: Request) {
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '10');
 
-    // Get books from database
+    // Get books from database - sort by last_read_at first, then updated_at
     const result = await query(
-      'SELECT * FROM books ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+      'SELECT * FROM books ORDER BY COALESCE(last_read_at, updated_at) DESC, id DESC LIMIT $1 OFFSET $2',
       [limit, (page - 1) * limit]
     );
 
