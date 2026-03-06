@@ -798,13 +798,13 @@ export async function searchVectorStore(
     return [];
   }
 
-  // 构建过滤条件
-  const filter: Record<string, unknown> = {};
+  // 构建过滤条件 - 使用 Chroma 正确的 Where 格式
+  let filter: { $eq: Record<string, string> } | undefined;
   if (filterType) {
-    filter.type = filterType;
+    filter = { $eq: { type: filterType } };
   }
 
-  const results = await vectorStore.similaritySearch(query, k, filter);
+  const results = await vectorStore.similaritySearch(query, k, filter as any);
 
   return results.map((doc) => ({
     content: doc.pageContent,
