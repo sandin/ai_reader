@@ -40,16 +40,6 @@ message content
 
 ## 客户端连接配置
 
-### 环境变量
-
-在 `.env` 文件中配置：
-
-```env
-MCP_AUTH_TOKEN=your-jwt-token
-```
-
-`MCP_AUTH_TOKEN` 需要是一个有效的 JWT token（用户登录后获取）。
-
 ### Claude Desktop 配置
 
 在 `claude_desktop_config.json` 或 MCP 客户端配置中添加：
