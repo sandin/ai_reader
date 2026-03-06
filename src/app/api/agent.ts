@@ -11,7 +11,7 @@ import * as path from 'path';
 let LangChainTracer: any;
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-require
-  LangChainTracer = require('@langchain/core/tracers').LangChainTracer;
+  LangChainTracer = require('@langchain/core/tracers/tracer_langchain').LangChainTracer;
 } catch (e) {
   console.warn('LangChainTracer not available:', e);
 }
