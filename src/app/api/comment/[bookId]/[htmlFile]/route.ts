@@ -58,7 +58,7 @@ export async function GET(
   }
 }
 
-// POST: 保存评论
+// POST: 保存/更新单条评论
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ bookId: string; htmlFile: string }> }
@@ -79,10 +79,15 @@ export async function POST(
       console.error('Failed to parse JSON body:', parseError);
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
-    const { comments } = body;
+
+    const { comment } = body;
 
     if (!bookId || !htmlFile) {
       return NextResponse.json({ error: 'Missing required parameters: bookId, htmlFile' }, { status: 400 });
+    }
+
+    if (!comment || !comment.content) {
+      return NextResponse.json({ error: 'Missing required field: comment.content' }, { status: 400 });
     }
 
     const chapterFile = htmlFile.split('/').pop() || htmlFile;
@@ -100,63 +105,114 @@ export async function POST(
     }
 
     const now = Math.floor(Date.now());
+    let commentId: number;
 
-    // Handle comments
-    if (comments && Array.isArray(comments)) {
-      // Get existing comment IDs for vector store deletion
-      const existingComments = await query(
-        'SELECT id FROM comments WHERE book_id = $1 AND chapter_file = $2',
-        [numericBookId, chapterFile]
-      );
-
-      // Delete existing comments from vector store
-      for (const existingComment of existingComments.rows) {
-        try {
-          await deleteCommentFromVectorStore(existingComment.id, auth.userId);
-        } catch (e) {
-          console.error('Failed to delete comment from vector store:', e);
-        }
-      }
-
-      // Delete existing comments from DB
+    if (comment.id) {
+      // 更新现有评论
       await query(
-        'DELETE FROM comments WHERE book_id = $1 AND chapter_file = $2',
-        [numericBookId, chapterFile]
+        'UPDATE comments SET comment_content = $1, selected_text = $2, cfi_range = $3, comment_timestamp = $4 WHERE id = $5 AND book_id = $6',
+        [
+          comment.content,
+          comment.selectedText || '',
+          comment.cfiRange || '',
+          now,
+          comment.id,
+          numericBookId
+        ]
       );
+      commentId = comment.id;
 
-      for (const comment of comments) {
-        const result = await query(
-          'INSERT INTO comments (book_id, chapter_file, comment_content, selected_text, cfi_range, comment_timestamp) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
-          [
-            numericBookId,
-            chapterFile,
-            comment.content,
-            comment.selectedText || '',
-            comment.cfiRange || '',
-            comment.timestamp || now
-          ]
-        );
-        const commentId = result.rows[0].id;
-
-        // Sync to vector store
-        try {
-          await syncCommentToVectorStore(
-            commentId,
-            comment.content,
-            comment.selectedText || '',
-            auth.userId,
-            numericBookId,
-            chapterFile
-          );
-        } catch (e) {
-          console.error('Failed to sync comment to vector store:', e);
-        }
+      // 从向量存储中删除旧的，重新添加
+      try {
+        await deleteCommentFromVectorStore(commentId, auth.userId);
+      } catch (e) {
+        console.error('Failed to delete comment from vector store:', e);
       }
+    } else {
+      // 新增评论
+      const result = await query(
+        'INSERT INTO comments (book_id, chapter_file, comment_content, selected_text, cfi_range, comment_timestamp) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+        [
+          numericBookId,
+          chapterFile,
+          comment.content,
+          comment.selectedText || '',
+          comment.cfiRange || '',
+          comment.timestamp || now
+        ]
+      );
+      commentId = result.rows[0].id;
     }
+
+    // 同步到向量存储
+    try {
+      await syncCommentToVectorStore(
+        commentId,
+        comment.content,
+        comment.selectedText || '',
+        auth.userId,
+        numericBookId,
+        chapterFile
+      );
+    } catch (e) {
+      console.error('Failed to sync comment to vector store:', e);
+    }
+
+    return NextResponse.json({ success: true, commentId });
+  } catch (error) {
+    console.error('Error saving comment:', error);
+    return NextResponse.json({ error: 'Failed to save comment' }, { status: 500 });
+  }
+}
+
+// DELETE: 删除单条评论
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ bookId: string; htmlFile: string }> }
+) {
+  let auth: { userId: number; username: string; schema: string };
+  try {
+    auth = await requireAuth(request);
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const { bookId, htmlFile } = await params;
+    const { searchParams } = new URL(request.url);
+    const commentId = searchParams.get('commentId');
+
+    if (!bookId || !htmlFile) {
+      return NextResponse.json({ error: 'Missing required parameters: bookId, htmlFile' }, { status: 400 });
+    }
+
+    if (!commentId) {
+      return NextResponse.json({ error: 'Missing required parameter: commentId' }, { status: 400 });
+    }
+
+    const numericBookId = parseInt(bookId, 10);
+    const numericCommentId = parseInt(commentId, 10);
+
+    if (isNaN(numericBookId) || isNaN(numericCommentId)) {
+      return NextResponse.json({ error: 'Invalid book ID or comment ID' }, { status: 400 });
+    }
+
+    // 从向量存储中删除
+    try {
+      await deleteCommentFromVectorStore(numericCommentId, auth.userId);
+    } catch (e) {
+      console.error('Failed to delete comment from vector store:', e);
+    }
+
+    // 从数据库中删除
+    await query(
+      'DELETE FROM comments WHERE id = $1 AND book_id = $2',
+      [numericCommentId, numericBookId]
+    );
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Error saving comments:', error);
-    return NextResponse.json({ error: 'Failed to save comments' }, { status: 500 });
+    console.error('Error deleting comment:', error);
+    return NextResponse.json({ error: 'Failed to delete comment' }, { status: 500 });
   }
 }

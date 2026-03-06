@@ -913,7 +913,6 @@ export default function ReaderPage() {
           body: JSON.stringify({
             sessionId: editingSessionId,
             selectedBlocks: session.selectedBlocks,
-            messages: session.messages,
             title: editingSessionTitle.trim(),
           }),
         });
@@ -1223,7 +1222,7 @@ export default function ReaderPage() {
         console.error('Failed to create session:', err);
       }
     } else if (currentChapter && bookId) {
-      // Save to existing session
+      // Save selectedBlocks to existing session (single operation)
       const htmlFile = currentChapter.split('#')[0];
       const encodedHtmlFile = encodeURIComponent(htmlFile);
       try {
@@ -1233,7 +1232,6 @@ export default function ReaderPage() {
           body: JSON.stringify({
             sessionId: currentSessionIdRef.current,
             selectedBlocks: newSelectedBlocks,
-            messages,
           }),
         });
       } catch (err) { /* ignore */ }
@@ -1330,11 +1328,11 @@ export default function ReaderPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            comments: [{
+            comment: {
               content: '⭐',
               selectedText: contextMenuSelection,
               cfiRange: contextMenuCfiRange,
-            }],
+            },
           }),
         });
       } catch (err) {
@@ -1415,6 +1413,25 @@ export default function ReaderPage() {
     const updatedComments = [...comments, newComment];
     setComments(updatedComments);
 
+    // Save to API (new comment only - without id for insert)
+    if (currentChapter && bookId) {
+      const htmlFile = currentChapter.split('#')[0];
+      const encodedHtmlFile = encodeURIComponent(htmlFile);
+      try {
+        await fetch(`/api/comment/${bookId}/${encodedHtmlFile}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            comment: {
+              content: newComment.content,
+              selectedText: newComment.selectedText,
+              cfiRange: newComment.cfiRange,
+            },
+          }),
+        });
+      } catch (err) { /* ignore */ }
+    }
+
     if (rendition && commentCfiRange) {
       try {
         rendition.annotations.highlight(commentCfiRange, {}, undefined, 'comment-highlight');
@@ -1425,18 +1442,6 @@ export default function ReaderPage() {
     setCurrentCommentText('');
     setCommentSelection('');
     setCommentCfiRange('');
-
-    if (currentChapter && bookId) {
-      const htmlFile = currentChapter.split('#')[0];
-      const encodedHtmlFile = encodeURIComponent(htmlFile);
-      try {
-        await fetch(`/api/comment/${bookId}/${encodedHtmlFile}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ comments: updatedComments }),
-        });
-      } catch (err) { /* ignore */ }
-    }
   };
 
   const handleDeleteComment = async (commentId: string) => {
@@ -1457,10 +1462,8 @@ export default function ReaderPage() {
       const htmlFile = currentChapter.split('#')[0];
       const encodedHtmlFile = encodeURIComponent(htmlFile);
       try {
-        await fetch(`/api/comment/${bookId}/${encodedHtmlFile}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ comments: updatedComments }),
+        await fetch(`/api/comment/${bookId}/${encodedHtmlFile}?commentId=${commentId}`, {
+          method: 'DELETE',
         });
       } catch (err) { /* ignore */ }
     }
@@ -1500,7 +1503,7 @@ export default function ReaderPage() {
         await fetch(`/api/comment/${bookId}/${encodedHtmlFile}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ comments: updatedComments }),
+          body: JSON.stringify({ comment: { id: commentId, content: newContent, selectedText: newSelectedText } }),
         });
       } catch (err) { /* ignore */ }
     }

@@ -308,8 +308,8 @@ export async function POST(
           [title || '对话', now, dbSessionId]
         );
 
+        // Only delete and re-insert selected_blocks (single operation)
         await query('DELETE FROM selected_blocks WHERE session_id = $1', [dbSessionId]);
-        await query('DELETE FROM chat_messages WHERE session_id = $1', [dbSessionId]);
       } else {
         const newSession = await query(
           'INSERT INTO chat_sessions (book_id, chapter_file, session_title, created_at, updated_at) VALUES ($1, $2, $3, $4, $5) RETURNING id',
@@ -325,7 +325,7 @@ export async function POST(
       dbSessionId = newSession.rows[0].id;
     }
 
-    // Insert selected blocks
+    // Insert selected blocks (single operation)
     if (dbSessionId && selectedBlocks && Array.isArray(selectedBlocks)) {
       for (const block of selectedBlocks) {
         await query(
@@ -335,32 +335,8 @@ export async function POST(
       }
     }
 
-    // Insert messages
-    if (dbSessionId && messages && Array.isArray(messages)) {
-      for (const msg of messages) {
-        const result = await query(
-          'INSERT INTO chat_messages (session_id, role, message_content, message_timestamp) VALUES ($1, $2, $3, $4) RETURNING id',
-          [dbSessionId, msg.role, msg.content || '', msg.timestamp || now]
-        );
-        const messageId = result.rows[0].id;
-
-        // 同步到向量数据库
-        if (msg.content && msg.role === 'assistant') {
-          try {
-            await syncMessageToVectorStore(
-              dbSessionId,
-              messageId,
-              msg.content,
-              auth.userId,
-              numericBookId,
-              chapterFile
-            );
-          } catch (e) {
-            console.error('Failed to sync message to vector store:', e);
-          }
-        }
-      }
-    }
+    // Note: Messages are handled separately via /api/chat (streaming) and DELETE/PUT endpoints
+    // Bulk insert of messages is removed to avoid deleting existing messages
 
     return NextResponse.json({ success: true, sessionId: dbSessionId });
   } catch (error) {
