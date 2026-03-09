@@ -1175,6 +1175,15 @@ export default function ReaderPage() {
     }
   };
 
+  const handleCopyLocation = async () => {
+    if (contextMenuCfiRange) {
+      try {
+        await navigator.clipboard.writeText(contextMenuCfiRange);
+        setShowContextMenu(false);
+      } catch (err) { /* ignore */ }
+    }
+  };
+
   const handleAddToAssistant = async () => {
     if (!contextMenuSelection || !rendition) return;
     const blockId = Date.now().toString();
@@ -1470,9 +1479,12 @@ const handleDeleteComment = async (commentId: string) => {    const comment = co
     return '';
   }, [viewerRef]);
 
-  const handleEditComment = async (commentId: string, newContent: string, newSelectedText?: string) => {
+  const handleEditComment = async (commentId: string, newContent: string, newSelectedText?: string, newCfiRange?: string) => {
     const comment = comments.find(c => c.id === commentId);
     if (!comment) return;
+
+    // 如果提供了新的 cfiRange，则使用它；否则保留原来的
+    const finalCfiRange = newCfiRange || comment.cfiRange || '';
 
     const updatedComments = comments.map(c =>
       c.id === commentId
@@ -1480,6 +1492,7 @@ const handleDeleteComment = async (commentId: string) => {    const comment = co
             ...c,
             content: newContent,
             selectedText: newSelectedText || c.selectedText,
+            cfiRange: finalCfiRange,
             timestamp: Date.now()
           }
         : c
@@ -1493,7 +1506,7 @@ const handleDeleteComment = async (commentId: string) => {    const comment = co
         await fetch(`/api/comment/${bookId}/${encodedHtmlFile}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ comment: { id: commentId, content: newContent, selectedText: newSelectedText } }),
+          body: JSON.stringify({ comment: { id: commentId, content: newContent, selectedText: newSelectedText, cfiRange: finalCfiRange } }),
         });
       } catch (err) { /* ignore */ }
     }
@@ -1650,6 +1663,7 @@ const handleDeleteComment = async (commentId: string) => {    const comment = co
                 onAddHighlight={handleAddHighlight}
                 onSummarize={handleSummarize}
                 onClose={() => setShowContextMenu(false)}
+                onCopyLocation={handleCopyLocation}
               />
 
               {/* Chapter navigation */}
@@ -1868,6 +1882,7 @@ const handleDeleteComment = async (commentId: string) => {    const comment = co
                   onJumpToCfi={handleJumpToCfi}
                   commentLoading={commentLoading}
                   getCurrentSelection={getCurrentSelection}
+                  getCurrentCfiRange={() => contextMenuCfiRange}
                 />
               )}
             </Panel>

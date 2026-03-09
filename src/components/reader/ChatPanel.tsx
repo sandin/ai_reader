@@ -8,6 +8,7 @@ import mermaid from 'mermaid';
 import { Panel, Group as PanelGroup, Separator } from 'react-resizable-panels';
 import { Block, Message, Session } from './types';
 import { formatRelativeTime } from '@/lib/utils';
+import { LinkInfo } from '@/components/MarkdownRenderer';
 
 interface ChatPanelProps {
   sessions: Session[];
@@ -48,6 +49,7 @@ interface ChatPanelProps {
   onOpenCompress?: (content: string, messageId: string) => void;
   onEditMessage?: (messageId: string, newContent: string) => void;
   onJumpToCfi?: (cfiRange: string) => void;
+  onLink?: (info: LinkInfo) => void;
 }
 
 export default function ChatPanel({
@@ -82,6 +84,7 @@ export default function ChatPanel({
   onOpenCompress,
   onEditMessage,
   onJumpToCfi,
+  onLink,
 }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -395,6 +398,7 @@ export default function ChatPanel({
                           mermaidEnabled={mermaidEnabled}
                           markdownBreaksEnabled={markdownBreaksEnabled}
                           remarkGfmEnabled={remarkGfmEnabled}
+                          onLink={onLink}
                         />
                       ) : (
                         <UserMessageContent
@@ -655,6 +659,7 @@ function MessageContent({
   mermaidEnabled = true,
   markdownBreaksEnabled = true,
   remarkGfmEnabled = true,
+  onLink,
 }: {
   content: string;
   isStreaming: boolean;
@@ -664,6 +669,7 @@ function MessageContent({
   mermaidEnabled?: boolean;
   markdownBreaksEnabled?: boolean;
   remarkGfmEnabled?: boolean;
+  onLink?: (info: LinkInfo) => void;
 }) {
   if (isStreaming && !content) {
     return (
@@ -771,16 +777,24 @@ function MessageContent({
         em: ({ children }) => (
           <em className="italic text-[#4a4a4a]">{children}</em>
         ),
-        a: ({ children, href }) => (
-          <a
-            href={href}
-            className="text-indigo-600 underline hover:text-indigo-800"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {children}
-          </a>
-        ),
+        a: ({ children, href, ...props }) => {
+          const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+            e.preventDefault();
+            if (href && onLink) {
+              onLink({ title: String(children), url: href });
+            }
+          };
+          return (
+            <a
+              href={href}
+              className="text-indigo-600 underline hover:text-indigo-800 cursor-pointer"
+              onClick={handleClick}
+              {...props}
+            >
+              {children}
+            </a>
+          );
+        },
         hr: () => <hr className="my-4 border-t border-slate-200" />,
         table: ({ children }) => (
           <div className="overflow-x-auto mb-3">

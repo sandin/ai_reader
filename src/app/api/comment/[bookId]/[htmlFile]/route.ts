@@ -108,13 +108,20 @@ export async function POST(
     let commentId: number;
 
     if (comment.id) {
+      // 获取现有评论的 cfiRange，如果未提供新值则保留原值
+      let finalCfiRange = comment.cfiRange;
+      if (!finalCfiRange) {
+        const existingComment = await query('SELECT cfi_range FROM comments WHERE id = $1', [comment.id]);
+        finalCfiRange = existingComment.rows[0]?.cfi_range || '';
+      }
+      
       // 更新现有评论
       await query(
         'UPDATE comments SET comment_content = $1, selected_text = $2, cfi_range = $3, comment_timestamp = $4 WHERE id = $5 AND book_id = $6',
         [
           comment.content,
           comment.selectedText || '',
-          comment.cfiRange || '',
+          finalCfiRange,
           now,
           comment.id,
           numericBookId

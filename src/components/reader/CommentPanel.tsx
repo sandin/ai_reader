@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Comment } from './types';
 import { formatRelativeTime } from '@/lib/utils';
+import MarkdownRenderer, { LinkInfo } from '@/components/MarkdownRenderer';
 
 interface CommentPanelProps {
   comments: Comment[];
@@ -11,10 +12,12 @@ interface CommentPanelProps {
   onInputChange: (text: string) => void;
   onSave: () => void;
   onDelete: (commentId: string) => void;
-  onEdit: (commentId: string, newContent: string, newSelectedText?: string) => void;
+  onEdit: (commentId: string, newContent: string, newSelectedText?: string, newCfiRange?: string) => void;
   onJumpToCfi?: (cfiRange: string) => void;
+  onLink?: (info: LinkInfo) => void;
   commentLoading?: boolean;
   getCurrentSelection?: () => string;
+  getCurrentCfiRange?: () => string;
 }
 
 export default function CommentPanel({
@@ -26,12 +29,15 @@ export default function CommentPanel({
   onDelete,
   onEdit,
   onJumpToCfi,
+  onLink,
   commentLoading = false,
   getCurrentSelection,
+  getCurrentCfiRange,
 }: CommentPanelProps) {
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState('');
   const [editingSelectedText, setEditingSelectedText] = useState('');
+  const [editingCfiRange, setEditingCfiRange] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
 
@@ -39,27 +45,35 @@ export default function CommentPanel({
     setEditingCommentId(comment.id);
     setEditingContent(comment.content);
     setEditingSelectedText(comment.selectedText);
+    setEditingCfiRange(comment.cfiRange || '');
   };
 
   const handleEditSave = () => {
     if (editingCommentId && editingContent.trim()) {
-      onEdit(editingCommentId, editingContent.trim(), editingSelectedText);
+      onEdit(editingCommentId, editingContent.trim(), editingSelectedText, editingCfiRange);
       setEditingCommentId(null);
       setEditingContent('');
       setEditingSelectedText('');
+      setEditingCfiRange('');
     }
   };
 
   const handleEditCancel = () => {
     setEditingCommentId(null);
     setEditingContent('');
+    setEditingSelectedText('');
+    setEditingCfiRange('');
   };
 
-  // 更新选中的文字
+  // 更新选中的文字和cfiRange
   const handleUpdateSelectedText = () => {
     const selectedText = getCurrentSelection ? getCurrentSelection() : '';
+    const cfiRange = getCurrentCfiRange ? getCurrentCfiRange() : '';
     if (selectedText) {
       setEditingSelectedText(selectedText);
+      if (cfiRange) {
+        setEditingCfiRange(cfiRange);
+      }
     }
   };
 
@@ -188,7 +202,11 @@ export default function CommentPanel({
                 </div>
               ) : (
                 <>
-                  <p className="text-sm text-slate-700 whitespace-pre-wrap">{comment.content}</p>
+                  <MarkdownRenderer
+                    content={comment.content}
+                    className="text-sm text-slate-700"
+                    onLink={onLink}
+                  />
                   <div className="flex items-center justify-between mt-2">
                     <p className="text-xs text-slate-400">
                       {formatRelativeTime(comment.timestamp)}

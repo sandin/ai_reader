@@ -194,9 +194,11 @@ export async function deleteMessageFromVectorStore(
   // 根据 session_id 和 message_id 删除匹配的文档
   await vectorStore.delete({
     filter: {
-      type: 'session',
-      session_id: sessionId,
-      message_id: messageId,
+      $and: [
+        { type: { $eq: 'session' } },
+        { session_id: { $eq: sessionId } },
+        { message_id: { $eq: messageId } },
+      ],
     },
   });
   console.log('[deleteMessageFromVectorStore] Deleted documents for session:', sessionId, 'message:', messageId);
@@ -270,8 +272,10 @@ export async function deleteCommentFromVectorStore(
   // 根据 comment_id 删除匹配的文档
   await vectorStore.delete({
     filter: {
-      type: 'comment',
-      comment_id: commentId,
+      $and: [
+        { type: { $eq: 'comment' } },
+        { comment_id: { $eq: commentId } },
+      ],
     },
   });
   console.log('[deleteCommentFromVectorStore] Deleted documents for comment:', commentId);
