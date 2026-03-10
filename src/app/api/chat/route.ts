@@ -108,12 +108,41 @@ export async function POST(req: NextRequest) {
 
     // 使用流式响应
     const encoder = new TextEncoder();
-    let fullAssistantContent = '';
+
+    // 创建后台任务来处理 LLM 调用和保存消息
+    // 这样即使用户离开页面，LLM 调用仍会继续并在完成后保存消息
+    const backgroundTask = (async () => {
+      let fullAssistantContent = '';
+      try {
+        // 流式输出
+        for await (const chunk of streamChat({
+          message: userContent,
+          history,
+          apiKey,
+          modelName,
+          temperature,
+          systemPrompt,
+        })) {
+          if (chunk.content) {
+            fullAssistantContent += chunk.content;
+          }
+        }
+
+        // 流式结束后保存AI消息到数据库（无论前端是否断开）
+        if (fullAssistantContent) {
+          await saveAssistantMessage(numericSessionId, fullAssistantContent);
+          await updateSessionTimestamp(numericSessionId);
+          console.log(`[Background] Saved assistant message for session ${numericSessionId}`);
+        }
+      } catch (error) {
+        console.error('[Background] Error in LLM stream:', error);
+      }
+    })();
 
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          // 流式输出
+          // 流式输出到前端
           for await (const chunk of streamChat({
             message: userContent,
             history,
@@ -123,24 +152,23 @@ export async function POST(req: NextRequest) {
             systemPrompt,
           })) {
             if (chunk.content) {
-              fullAssistantContent += chunk.content;
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: chunk.content })}\n\n`));
             }
           }
 
-          // 流式结束后保存AI消息到数据库
-          if (fullAssistantContent) {
-            await saveAssistantMessage(numericSessionId, fullAssistantContent);
-            await updateSessionTimestamp(numericSessionId);
-          }
-
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
+
+          // 等待后台任务完成（确保消息保存）
+          await backgroundTask;
         } catch (error) {
           console.error('Error in stream:', error);
           const errorMessage = error instanceof Error ? error.message : String(error);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`));
           controller.close();
+
+          // 即使前端出错，后台任务仍会继续执行
+          backgroundTask.catch(console.error);
         }
       },
     });
