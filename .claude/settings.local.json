@@ -20,5 +20,6 @@
       "Bash(powershell -Command \"Get-Process | Where-Object {$_Path -like ''*ai_reader*''} | Select-Object Id, ProcessName\")",
       "Bash(npm install pg)"
     ]
-  }
+  },
+  "autoMemoryEnabled": true
 }
