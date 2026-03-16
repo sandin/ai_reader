@@ -612,7 +612,11 @@ export default function ReaderPage() {
   const getCurrentPageNumber = () => {
     if (!currentChapter || !chapterIndex.htmlOrder || chapterIndex.htmlOrder.length === 0) return 0;
     const currentHtml = currentChapter.split('#')[0];
-    const index = chapterIndex.htmlOrder.findIndex(h => h.includes(currentHtml.split('/').pop() || ''));
+    const currentFileName = currentHtml.split('/').pop() || '';
+    const index = chapterIndex.htmlOrder.findIndex(h => {
+      const hFileName = h.split('/').pop() || '';
+      return hFileName === currentFileName;
+    });
     return index >= 0 ? index + 1 : 0;
   };
 
